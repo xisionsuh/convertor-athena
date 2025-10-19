@@ -24,13 +24,18 @@ export default function Home() {
   const [isCompressing, setIsCompressing] = useState(false);
   const [compressionProgress, setCompressionProgress] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const ffmpegRef = useRef(new FFmpeg());
+  const ffmpegRef = useRef<FFmpeg | null>(null);
   const [ffmpegLoaded, setFfmpegLoaded] = useState(false);
+
+  // FFmpeg은 클라이언트에서만 초기화
+  if (typeof window !== 'undefined' && !ffmpegRef.current) {
+    ffmpegRef.current = new FFmpeg();
+  }
 
   const selectedSession = sessions.find(s => s.id === selectedSessionId);
 
   const loadFFmpeg = async () => {
-    if (ffmpegLoaded) return;
+    if (ffmpegLoaded || !ffmpegRef.current) return;
 
     const ffmpeg = ffmpegRef.current;
     const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
@@ -50,6 +55,7 @@ export default function Home() {
     try {
       await loadFFmpeg();
       const ffmpeg = ffmpegRef.current;
+      if (!ffmpeg) throw new Error('FFmpeg not initialized');
 
       setCompressionProgress('파일 로딩 중...');
       const inputName = 'input' + inputFile.name.substring(inputFile.name.lastIndexOf('.'));
@@ -121,6 +127,7 @@ export default function Home() {
     try {
       await loadFFmpeg();
       const ffmpeg = ffmpegRef.current;
+      if (!ffmpeg) throw new Error('FFmpeg not initialized');
 
       setCompressionProgress('파일 로딩 중...');
       const inputName = 'input' + inputFile.name.substring(inputFile.name.lastIndexOf('.'));
