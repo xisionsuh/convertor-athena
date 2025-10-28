@@ -1,0 +1,19 @@
+{
+  "name": "회의녹음변환기",
+  "short_name": "회의변환기",
+  "description": "OpenAI Whisper를 이용한 회의 녹음 음성-텍스트 변환 및 회의록 자동 생성",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3b82f6",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ],
+  "categories": ["productivity", "utilities"],
+  "screenshots": []
+}

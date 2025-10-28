@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
 interface FileSession {
   id: string;
   fileName: string;
-  file: File;
+  file: File | null;
   transcription: string;
   minutes: string;
   chunks: { id: string; name: string; transcription: string }[];
@@ -15,24 +15,142 @@ interface FileSession {
   createdAt: Date;
 }
 
+interface Toast {
+  id: number;
+  message: string;
+  type: 'success' | 'info' | 'error';
+}
+
 export default function Home() {
   const [sessions, setSessions] = useState<FileSession[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]); // 다중 선택
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
-  const [copySuccess, setCopySuccess] = useState(false);
+  const [copySuccess, setCopySuccess] = useState<string | null>(null); // 어느 버튼이 복사되었는지 추적
   const [isCompressing, setIsCompressing] = useState(false);
   const [compressionProgress, setCompressionProgress] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [toasts, setToasts] = useState<Toast[]>([]);
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const [ffmpegLoaded, setFfmpegLoaded] = useState(false);
 
-  // FFmpeg은 클라이언트에서만 초기화
-  if (typeof window !== 'undefined' && !ffmpegRef.current) {
-    ffmpegRef.current = new FFmpeg();
-  }
+  // 녹음 관련 상태
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const selectedSession = sessions.find(s => s.id === selectedSessionId);
+
+  // 토스트 알림 표시
+  const showToast = (message: string, type: 'success' | 'info' | 'error' = 'info') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 3000);
+  };
+
+  // 웨이브폼 그리기 (isPaused 변경 시 색상 업데이트)
+  useEffect(() => {
+    if (isRecording && canvasRef.current && analyserRef.current) {
+      const canvas = canvasRef.current;
+      const canvasCtx = canvas.getContext('2d');
+      const analyser = analyserRef.current;
+
+      if (!canvasCtx) return;
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const draw = () => {
+        if (!isRecording) return; // 녹음이 끝나면 중지
+
+        animationFrameRef.current = requestAnimationFrame(draw);
+        analyser.getByteTimeDomainData(dataArray);
+
+        canvasCtx.fillStyle = 'rgb(255, 255, 255)';
+        canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+        canvasCtx.lineWidth = 2;
+        canvasCtx.strokeStyle = isPaused ? 'rgb(234, 179, 8)' : 'rgb(220, 38, 38)';
+
+        canvasCtx.beginPath();
+
+        const sliceWidth = canvas.width / bufferLength;
+        let x = 0;
+
+        for (let i = 0; i < bufferLength; i++) {
+          const v = dataArray[i] / 128.0;
+          const y = (v * canvas.height) / 2;
+
+          if (i === 0) {
+            canvasCtx.moveTo(x, y);
+          } else {
+            canvasCtx.lineTo(x, y);
+          }
+
+          x += sliceWidth;
+        }
+
+        canvasCtx.lineTo(canvas.width, canvas.height / 2);
+        canvasCtx.stroke();
+      };
+
+      draw();
+    }
+  }, [isRecording, isPaused]);
+
+  // localStorage에서 세션 복원
+  useEffect(() => {
+    const savedSessions = localStorage.getItem('meeting-sessions');
+    if (savedSessions) {
+      try {
+        const parsed = JSON.parse(savedSessions);
+        // File 객체는 저장할 수 없으므로, 기본 정보만 복원
+        const restoredSessions = parsed.map((s: FileSession) => ({
+          ...s,
+          file: null, // File 객체는 복원 불가
+          createdAt: new Date(s.createdAt),
+          // 변환 중 상태였다면 대기 상태로 리셋 (페이지 새로고침 후 멈춰있는 파일 방지)
+          status: s.status === 'transcribing' ? 'pending' : s.status,
+        }));
+        setSessions(restoredSessions);
+      } catch (error) {
+        console.error('Failed to restore sessions:', error);
+      }
+    }
+  }, []);
+
+  // 세션이 변경될 때마다 localStorage에 저장
+  useEffect(() => {
+    if (sessions.length > 0) {
+      // File 객체를 제외하고 저장
+      const sessionsToSave = sessions.map(s => ({
+        ...s,
+        file: s.file ? {
+          name: s.file.name,
+          size: s.file.size,
+          type: s.file.type,
+        } : null,
+      }));
+      localStorage.setItem('meeting-sessions', JSON.stringify(sessionsToSave));
+    }
+  }, [sessions]);
+
+  // FFmpeg은 클라이언트에서만 초기화
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !ffmpegRef.current) {
+      ffmpegRef.current = new FFmpeg();
+    }
+  }, []);
 
   const loadFFmpeg = async () => {
     if (ffmpegLoaded || !ffmpegRef.current) return;
@@ -66,7 +184,6 @@ export default function Home() {
 
       // 청크 분할
       const chunks: File[] = [];
-      let chunkIndex = 0;
       const chunkDurationSeconds = chunkDurationMinutes * 60;
 
       setCompressionProgress('파일 분할 중...');
@@ -93,16 +210,20 @@ export default function Home() {
           const data = await ffmpeg.readFile(outputName);
 
           // 파일이 너무 작으면 (1KB 미만) 더 이상 분할할 내용이 없는 것
-          if (data.length < 1000) {
+          if ((data as Uint8Array).length < 1000) {
             break;
           }
 
-          const blob = new Blob([data], { type: 'audio/mp3' });
+          // Uint8Array를 일반 ArrayBuffer로 변환
+          const uint8Data = data as Uint8Array;
+          const arrayBuffer = uint8Data.buffer.slice(
+            uint8Data.byteOffset,
+            uint8Data.byteOffset + uint8Data.byteLength
+          ) as ArrayBuffer;
+          const blob = new Blob([arrayBuffer], { type: 'audio/mp3' });
           const chunk = new File([blob], `chunk_${i}.mp3`, { type: 'audio/mp3' });
           chunks.push(chunk);
-
-          chunkIndex++;
-        } catch (err) {
+        } catch {
           // 더 이상 분할할 내용이 없으면 종료
           break;
         }
@@ -120,7 +241,7 @@ export default function Home() {
     }
   };
 
-  const compressAudio = async (inputFile: File): Promise<File> => {
+  const _compressAudio = async (inputFile: File): Promise<File> => {
     setIsCompressing(true);
     setCompressionProgress('오디오 압축 준비 중...');
 
@@ -148,7 +269,12 @@ export default function Home() {
 
       setCompressionProgress('압축 완료! 파일 저장 중...');
       const data = await ffmpeg.readFile(outputName);
-      const blob = new Blob([data], { type: 'audio/mp3' });
+      const uint8Data = data as Uint8Array;
+      const arrayBuffer = uint8Data.buffer.slice(
+        uint8Data.byteOffset,
+        uint8Data.byteOffset + uint8Data.byteLength
+      ) as ArrayBuffer;
+      const blob = new Blob([arrayBuffer], { type: 'audio/mp3' });
       const compressedFile = new File([blob], `compressed_${inputFile.name.replace(/\.[^/.]+$/, '')}.mp3`, { type: 'audio/mp3' });
 
       setCompressionProgress('');
@@ -206,8 +332,109 @@ export default function Home() {
     return data.text;
   };
 
+  // 여러 파일 일괄 변환
+  const handleBatchTranscribe = async () => {
+    if (selectedSessionIds.length === 0) {
+      showToast('변환할 파일을 선택해주세요.', 'error');
+      return;
+    }
+
+    const sessionsToTranscribe = sessions.filter(s => selectedSessionIds.includes(s.id) && s.file);
+
+    if (sessionsToTranscribe.length === 0) {
+      showToast('선택한 파일 중 변환 가능한 파일이 없습니다.', 'error');
+      return;
+    }
+
+    showToast(`${sessionsToTranscribe.length}개 파일 일괄 변환을 시작합니다.`, 'info');
+    setIsTranscribing(true);
+
+    for (let i = 0; i < sessionsToTranscribe.length; i++) {
+      const session = sessionsToTranscribe[i];
+      setCompressionProgress(`${i + 1}/${sessionsToTranscribe.length} 파일 처리 중: ${session.fileName}`);
+
+      try {
+        await transcribeSingleSession(session.id);
+      } catch (error) {
+        console.error(`Failed to transcribe ${session.fileName}:`, error);
+        showToast(`${session.fileName} 변환 중 오류 발생`, 'error');
+        // 오류가 발생해도 다음 파일 계속 처리
+      }
+    }
+
+    setIsTranscribing(false);
+    setCompressionProgress('');
+    showToast('모든 파일 변환이 완료되었습니다!', 'success');
+  };
+
+  // 단일 세션 변환 (기존 로직 분리)
+  const transcribeSingleSession = async (sessionId: string) => {
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session || !session.file) return;
+
+    const maxSize = 25 * 1024 * 1024; // 25MB
+
+    // 세션 상태 업데이트
+    setSessions(prev => prev.map(s =>
+      s.id === sessionId ? { ...s, status: 'transcribing' as const } : s
+    ));
+
+    try {
+      // 파일이 25MB보다 크면 분할 처리
+      if (session.file.size > maxSize) {
+        // 파일 분할
+        const chunks = await splitAudioIntoChunks(session.file);
+
+        if (chunks.length === 0) {
+          throw new Error('파일 분할 실패');
+        }
+
+        // 각 청크를 순차적으로 변환
+        let fullTranscription = '';
+        const chunkSessions: { id: string; name: string; transcription: string }[] = [];
+
+        for (let i = 0; i < chunks.length; i++) {
+          try {
+            const chunkText = await transcribeFile(chunks[i]);
+            fullTranscription += `\n\n${chunkText}`;
+            chunkSessions.push({
+              id: `chunk-${i}`,
+              name: `Part ${i + 1}`,
+              transcription: chunkText
+            });
+          } catch (error) {
+            console.error(`Chunk ${i + 1} error:`, error);
+          }
+        }
+
+        // 세션 업데이트
+        setSessions(prev => prev.map(s =>
+          s.id === sessionId
+            ? { ...s, transcription: fullTranscription.trim(), chunks: chunkSessions, status: 'completed' as const }
+            : s
+        ));
+      } else {
+        // 일반 변환
+        const text = await transcribeFile(session.file);
+
+        // 세션 업데이트
+        setSessions(prev => prev.map(s =>
+          s.id === sessionId
+            ? { ...s, transcription: text, status: 'completed' as const }
+            : s
+        ));
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      setSessions(prev => prev.map(s =>
+        s.id === sessionId ? { ...s, status: 'error' as const } : s
+      ));
+      throw error;
+    }
+  };
+
   const handleTranscribe = async () => {
-    if (!selectedSession) return;
+    if (!selectedSession || !selectedSession.file) return;
 
     const maxSize = 25 * 1024 * 1024; // 25MB
 
@@ -220,26 +447,17 @@ export default function Home() {
     try {
       // 파일이 25MB보다 크면 분할 처리
       if (selectedSession.file.size > maxSize) {
-        const shouldSplit = confirm(
-          `파일 크기가 ${(selectedSession.file.size / 1024 / 1024).toFixed(2)}MB입니다.\n\n` +
-          `파일을 10분 단위로 자동 분할하여 변환하시겠습니까?\n` +
-          `(분할 및 변환에 시간이 소요될 수 있습니다)`
+        showToast(
+          `파일 크기 ${(selectedSession.file.size / 1024 / 1024).toFixed(2)}MB - 10분 단위로 자동 분할하여 변환합니다.`,
+          'info'
         );
-
-        if (!shouldSplit) {
-          setSessions(prev => prev.map(s =>
-            s.id === selectedSessionId ? { ...s, status: 'pending' as const } : s
-          ));
-          setIsTranscribing(false);
-          return;
-        }
 
         // 파일 분할
         setCompressionProgress('파일 분할 시작...');
         const chunks = await splitAudioIntoChunks(selectedSession.file);
 
         if (chunks.length === 0) {
-          alert('파일 분할에 실패했습니다.');
+          showToast('파일 분할에 실패했습니다.', 'error');
           setSessions(prev => prev.map(s =>
             s.id === selectedSessionId ? { ...s, status: 'error' as const } : s
           ));
@@ -247,11 +465,11 @@ export default function Home() {
           return;
         }
 
-        alert(`파일이 ${chunks.length}개로 분할되었습니다. 순차적으로 변환을 시작합니다.`);
+        showToast(`파일이 ${chunks.length}개로 분할되었습니다. 순차 변환을 시작합니다.`, 'success');
 
         // 각 청크를 순차적으로 변환
         let fullTranscription = '';
-        const chunkSessions = [];
+        const chunkSessions: { id: string; name: string; transcription: string }[] = [];
 
         for (let i = 0; i < chunks.length; i++) {
           setCompressionProgress(`${i + 1}/${chunks.length} 파일 변환 중...`);
@@ -265,7 +483,7 @@ export default function Home() {
             });
           } catch (error) {
             console.error(`Chunk ${i + 1} error:`, error);
-            alert(`${i + 1}번째 파일 변환 중 오류가 발생했습니다. 계속 진행합니다.`);
+            showToast(`${i + 1}번째 파트 변환 중 오류 발생, 계속 진행합니다.`, 'error');
           }
         }
 
@@ -278,7 +496,7 @@ export default function Home() {
             : s
         ));
 
-        alert('모든 파일 변환이 완료되었습니다!');
+        showToast('모든 파일 변환이 완료되었습니다!', 'success');
       } else {
         // 일반 변환
         const text = await transcribeFile(selectedSession.file);
@@ -289,10 +507,11 @@ export default function Home() {
             ? { ...s, transcription: text, status: 'completed' as const }
             : s
         ));
+        showToast('텍스트 변환이 완료되었습니다!', 'success');
       }
     } catch (error) {
       console.error('Error:', error);
-      alert('음성 변환 중 오류가 발생했습니다.');
+      showToast('음성 변환 중 오류가 발생했습니다.', 'error');
       setSessions(prev => prev.map(s =>
         s.id === selectedSessionId ? { ...s, status: 'error' as const } : s
       ));
@@ -317,7 +536,7 @@ export default function Home() {
 
       const data = await response.json();
       if (data.error) {
-        alert(data.error);
+        showToast(data.error, 'error');
       } else {
         // 세션 업데이트
         setSessions(prev => prev.map(s =>
@@ -325,10 +544,11 @@ export default function Home() {
             ? { ...s, minutes: data.minutes }
             : s
         ));
+        showToast('회의록 생성이 완료되었습니다!', 'success');
       }
     } catch (error) {
       console.error('Error:', error);
-      alert('회의록 생성 중 오류가 발생했습니다.');
+      showToast('회의록 생성 중 오류가 발생했습니다.', 'error');
     } finally {
       setIsSummarizing(false);
     }
@@ -339,7 +559,7 @@ export default function Home() {
 
     const content = type === 'transcription' ? selectedSession.transcription : selectedSession.minutes;
     if (!content) {
-      alert('다운로드할 내용이 없습니다.');
+      showToast('다운로드할 내용이 없습니다.', 'error');
       return;
     }
 
@@ -353,15 +573,197 @@ export default function Home() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    showToast('파일이 다운로드되었습니다.', 'success');
   };
 
   const handleDeleteSession = (sessionId: string) => {
-    if (confirm('이 파일을 삭제하시겠습니까?')) {
-      setSessions(prev => prev.filter(s => s.id !== sessionId));
-      if (selectedSessionId === sessionId) {
-        setSelectedSessionId(sessions.find(s => s.id !== sessionId)?.id || null);
-      }
+    const session = sessions.find(s => s.id === sessionId);
+
+    // 실제 변환 작업 중일 때만 삭제 불가 (멈춰있는 상태는 삭제 가능)
+    if (session?.status === 'transcribing' && isTranscribing) {
+      showToast('변환 작업 중인 파일은 삭제할 수 없습니다.', 'error');
+      return;
     }
+
+    setSessions(prev => prev.filter(s => s.id !== sessionId));
+    if (selectedSessionId === sessionId) {
+      setSelectedSessionId(sessions.find(s => s.id !== sessionId)?.id || null);
+    }
+    showToast('파일이 삭제되었습니다.', 'info');
+  };
+
+  // 녹음 시간 포맷팅
+  const formatRecordingTime = (seconds: number) => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // 녹음 시작
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      // 오디오 컨텍스트 및 분석기 설정
+      audioContextRef.current = new AudioContext();
+      analyserRef.current = audioContextRef.current.createAnalyser();
+      const source = audioContextRef.current.createMediaStreamSource(stream);
+      source.connect(analyserRef.current);
+      analyserRef.current.fftSize = 2048;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      setIsPaused(false);
+
+      // 녹음 시간 카운터
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+
+      showToast('녹음이 시작되었습니다.', 'success');
+    } catch (error) {
+      console.error('Recording error:', error);
+      showToast('마이크 접근 권한이 필요합니다.', 'error');
+    }
+  };
+
+  // 녹음 일시정지/재개
+  const togglePauseRecording = () => {
+    if (!mediaRecorderRef.current) return;
+
+    if (isPaused) {
+      mediaRecorderRef.current.resume();
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+      setIsPaused(false);
+      showToast('녹음을 재개합니다.', 'info');
+    } else {
+      mediaRecorderRef.current.pause();
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+      }
+      setIsPaused(true);
+      showToast('녹음이 일시정지되었습니다.', 'info');
+    }
+  };
+
+  // 녹음 중지 및 저장 (항상 파일로 다운로드)
+  const stopRecording = async (autoTranscribe: boolean = false) => {
+    if (!mediaRecorderRef.current) return;
+
+    return new Promise<void>((resolve) => {
+      if (mediaRecorderRef.current) {
+        mediaRecorderRef.current.onstop = async () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const fileName = `녹음_${new Date().toLocaleString('ko-KR').replace(/[. :]/g, '_')}.webm`;
+          const audioFile = new File([audioBlob], fileName, { type: 'audio/webm' });
+
+          // 항상 로컬 파일로 다운로드
+          const url = URL.createObjectURL(audioBlob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = fileName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          showToast('녹음 파일이 다운로드되었습니다!', 'success');
+
+          // 세션에 추가
+          const newSession: FileSession = {
+            id: `${Date.now()}-${Math.random()}`,
+            fileName: fileName,
+            file: audioFile,
+            transcription: '',
+            minutes: '',
+            chunks: [],
+            status: 'pending',
+            createdAt: new Date(),
+          };
+
+          setSessions(prev => [...prev, newSession]);
+          setSelectedSessionId(newSession.id);
+
+          // 녹음 정리
+          const stream = mediaRecorderRef.current?.stream;
+          stream?.getTracks().forEach(track => track.stop());
+
+          if (recordingIntervalRef.current) {
+            clearInterval(recordingIntervalRef.current);
+          }
+
+          if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+          }
+
+          if (audioContextRef.current) {
+            audioContextRef.current.close();
+          }
+
+          setIsRecording(false);
+          setRecordingTime(0);
+          setIsPaused(false);
+          mediaRecorderRef.current = null;
+          audioChunksRef.current = [];
+          audioContextRef.current = null;
+          analyserRef.current = null;
+
+          showToast('녹음이 저장되었습니다!', 'success');
+
+          // 자동 변환
+          if (autoTranscribe) {
+            setTimeout(() => {
+              transcribeSingleSession(newSession.id);
+            }, 500);
+          }
+
+          resolve();
+        };
+
+        mediaRecorderRef.current.stop();
+      }
+    });
+  };
+
+  // 녹음 취소
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current) {
+      const stream = mediaRecorderRef.current.stream;
+      stream.getTracks().forEach(track => track.stop());
+      mediaRecorderRef.current = null;
+    }
+
+    if (recordingIntervalRef.current) {
+      clearInterval(recordingIntervalRef.current);
+    }
+
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+    }
+
+    audioChunksRef.current = [];
+    audioContextRef.current = null;
+    analyserRef.current = null;
+    setIsRecording(false);
+    setRecordingTime(0);
+    setIsPaused(false);
+    showToast('녹음이 취소되었습니다.', 'info');
   };
 
   const handleCopy = async (type: 'transcription' | 'minutes') => {
@@ -369,87 +771,153 @@ export default function Home() {
 
     const content = type === 'transcription' ? selectedSession.transcription : selectedSession.minutes;
     if (!content) {
-      alert('복사할 내용이 없습니다.');
+      showToast('복사할 내용이 없습니다.', 'error');
       return;
     }
 
     try {
       await navigator.clipboard.writeText(content);
-      setCopySuccess(true);
-      setTimeout(() => setCopySuccess(false), 2000);
+      setCopySuccess(type);
+      showToast('클립보드에 복사되었습니다!', 'success');
+      setTimeout(() => setCopySuccess(null), 2000);
     } catch (error) {
       console.error('Error copying text:', error);
-      alert('텍스트 복사에 실패했습니다.');
+      showToast('텍스트 복사에 실패했습니다.', 'error');
     }
   };
 
   return (
     <div className="flex h-screen bg-gray-100">
+      {/* 토스트 알림 */}
+      <div className="fixed top-4 right-4 z-50 space-y-2">
+        {toasts.map(toast => (
+          <div
+            key={toast.id}
+            className={`px-4 py-3 rounded-lg shadow-lg text-white text-sm font-medium animate-slide-in-right ${
+              toast.type === 'success' ? 'bg-green-500' :
+              toast.type === 'error' ? 'bg-red-500' :
+              'bg-blue-500'
+            }`}
+          >
+            {toast.message}
+          </div>
+        ))}
+      </div>
+
       {/* 사이드바 */}
       <div className={`${sidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 bg-white shadow-lg overflow-hidden flex flex-col`}>
         <div className="p-4 border-b">
-          <h2 className="text-lg font-bold text-gray-900">파일 목록</h2>
-          <p className="text-xs text-gray-500 mt-1">{sessions.length}개 파일</p>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-lg font-bold text-gray-900">파일 목록</h2>
+            <div className="flex gap-2">
+              {sessions.length > 0 && (
+                <button
+                  onClick={() => {
+                    if (selectedSessionIds.length === sessions.length) {
+                      setSelectedSessionIds([]);
+                    } else {
+                      setSelectedSessionIds(sessions.map(s => s.id));
+                    }
+                  }}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                >
+                  {selectedSessionIds.length === sessions.length ? '전체 해제' : '전체 선택'}
+                </button>
+              )}
+              {selectedSessionIds.length > 0 && selectedSessionIds.length < sessions.length && (
+                <button
+                  onClick={() => setSelectedSessionIds([])}
+                  className="text-xs text-gray-600 hover:text-gray-800"
+                >
+                  선택 해제
+                </button>
+              )}
+            </div>
+          </div>
+          <p className="text-xs text-gray-500">{sessions.length}개 파일 {selectedSessionIds.length > 0 && `(${selectedSessionIds.length}개 선택)`}</p>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          {sessions.map((session) => (
+          {sessions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).map((session) => (
             <div
               key={session.id}
-              onClick={() => setSelectedSessionId(session.id)}
-              className={`p-3 rounded-lg cursor-pointer transition-colors ${
+              className={`p-3 rounded-lg transition-colors ${
                 selectedSessionId === session.id
                   ? 'bg-blue-50 border-2 border-blue-500'
                   : 'bg-gray-50 hover:bg-gray-100 border-2 border-transparent'
               }`}
             >
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">
+              <div className="flex items-start gap-2">
+                {/* 체크박스 */}
+                <input
+                  type="checkbox"
+                  checked={selectedSessionIds.includes(session.id)}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    if (e.target.checked) {
+                      setSelectedSessionIds(prev => [...prev, session.id]);
+                    } else {
+                      setSelectedSessionIds(prev => prev.filter(id => id !== session.id));
+                    }
+                  }}
+                  className="mt-1 w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                />
+
+                <div
+                  className="flex-1 min-w-0 cursor-pointer"
+                  onClick={() => setSelectedSessionId(session.id)}
+                >
+                  <p className="text-sm font-medium text-gray-900 truncate" title={session.fileName}>
                     {session.fileName}
                   </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {(session.file.size / 1024 / 1024).toFixed(2)}MB
-                  </p>
-                  <div className="flex items-center gap-2 mt-2">
-                    <span className={`text-xs px-2 py-0.5 rounded ${
+                  <div className="flex items-center gap-2 mt-1">
+                    {session.file && (
+                      <span className="text-xs text-gray-500">
+                        {(session.file.size / 1024 / 1024).toFixed(1)}MB
+                      </span>
+                    )}
+                    <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
                       session.status === 'completed' ? 'bg-green-100 text-green-700' :
                       session.status === 'transcribing' ? 'bg-blue-100 text-blue-700' :
                       session.status === 'error' ? 'bg-red-100 text-red-700' :
-                      'bg-gray-100 text-gray-700'
+                      'bg-gray-100 text-gray-600'
                     }`}>
-                      {session.status === 'completed' ? '완료' :
-                       session.status === 'transcribing' ? '변환중' :
-                       session.status === 'error' ? '오류' : '대기'}
+                      {session.status === 'completed' ? '✓' :
+                       session.status === 'transcribing' ? '...' :
+                       session.status === 'error' ? '!' : '◯'}
                     </span>
-                    {session.chunks.length > 0 && (
-                      <span className="text-xs text-gray-500">
-                        {session.chunks.length}개 파트
-                      </span>
-                    )}
                   </div>
                 </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteSession(session.id);
-                  }}
-                  className="ml-2 text-gray-400 hover:text-red-600"
-                >
-                  ✕
-                </button>
-              </div>
 
-              {/* 청크 목록 */}
-              {session.chunks.length > 0 && selectedSessionId === session.id && (
-                <div className="mt-2 pl-2 space-y-1">
-                  {session.chunks.map((chunk) => (
-                    <div key={chunk.id} className="text-xs text-gray-600 py-1">
-                      📄 {chunk.name}
-                    </div>
-                  ))}
+                <div className="flex gap-1">
+                  {/* 변환 중 상태를 수동으로 재설정할 수 있는 버튼 */}
+                  {session.status === 'transcribing' && !isTranscribing && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSessions(prev => prev.map(s =>
+                          s.id === session.id ? { ...s, status: 'pending' as const } : s
+                        ));
+                        showToast('파일 상태를 대기로 변경했습니다.', 'info');
+                      }}
+                      className="text-yellow-600 hover:text-yellow-800 text-sm leading-none"
+                      title="상태 초기화"
+                    >
+                      ⟳
+                    </button>
+                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteSession(session.id);
+                    }}
+                    className="text-gray-400 hover:text-red-600 text-lg leading-none"
+                    title="삭제"
+                  >
+                    ×
+                  </button>
                 </div>
-              )}
+              </div>
             </div>
           ))}
 
@@ -482,9 +950,80 @@ export default function Home() {
             </p>
           </div>
 
+          {/* 녹음기 영역 */}
+          <div className="bg-gradient-to-r from-red-50 to-pink-50 rounded-lg shadow p-6 mb-6 border-2 border-red-200">
+            <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+              🎙️ 녹음기
+            </h3>
+
+            {!isRecording ? (
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600">음성 녹음 후 바로 텍스트로 변환할 수 있습니다.</p>
+                <button
+                  onClick={startRecording}
+                  disabled={isTranscribing || isCompressing}
+                  className="w-full bg-red-600 hover:bg-red-700 text-white py-3 px-6 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  <span className="text-xl">●</span> 녹음 시작
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* 웨이브폼 시각화 */}
+                <div className="bg-white rounded-lg p-3 border-2 border-red-300">
+                  <canvas
+                    ref={canvasRef}
+                    width="600"
+                    height="100"
+                    className="w-full h-24"
+                  />
+                </div>
+
+                {/* 녹음 시간 표시 */}
+                <div className="flex items-center justify-center gap-3 p-4 bg-white rounded-lg">
+                  <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-red-600 animate-pulse'}`}></div>
+                  <span className="text-3xl font-mono font-bold text-gray-900">
+                    {formatRecordingTime(recordingTime)}
+                  </span>
+                  {isPaused && <span className="text-sm text-yellow-600 font-medium">일시정지</span>}
+                </div>
+
+                {/* 녹음 컨트롤 버튼 */}
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={togglePauseRecording}
+                    className="bg-yellow-500 hover:bg-yellow-600 text-white py-3 px-4 rounded-lg font-medium transition-colors"
+                  >
+                    {isPaused ? '▶ 재개' : '⏸ 일시정지'}
+                  </button>
+                  <button
+                    onClick={() => stopRecording(false)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg font-medium transition-colors"
+                  >
+                    ■ 저장
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => stopRecording(true)}
+                    className="bg-green-600 hover:bg-green-700 text-white py-3 px-4 rounded-lg font-medium transition-colors"
+                  >
+                    ■ 저장 & 변환
+                  </button>
+                  <button
+                    onClick={cancelRecording}
+                    className="bg-gray-500 hover:bg-gray-600 text-white py-3 px-4 rounded-lg font-medium transition-colors"
+                  >
+                    ✕ 취소
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* 파일 업로드 영역 */}
           <div className="bg-white rounded-lg shadow p-6 mb-6">
-            {isCompressing && (
+            {(isCompressing || compressionProgress) && (
               <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
                 <div className="flex items-center space-x-3">
                   <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
@@ -494,19 +1033,42 @@ export default function Home() {
             )}
 
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              음성 파일 선택 (여러 파일 가능)
+              음성 파일 업로드 (여러 파일 가능)
             </label>
             <input
               type="file"
               accept="audio/*"
               onChange={handleFileChange}
               multiple
-              disabled={isCompressing}
+              disabled={isCompressing || isTranscribing || isRecording}
               className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 p-2.5 disabled:opacity-50"
             />
             <p className="mt-2 text-xs text-gray-500">
               * 25MB 초과 파일은 자동으로 10분 단위로 분할됩니다
             </p>
+
+            {/* 일괄 변환 버튼 */}
+            {selectedSessionIds.length > 0 && (
+              <div className="mt-4 p-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">
+                      {selectedSessionIds.length}개 파일 선택됨
+                    </p>
+                    <p className="text-xs text-gray-600 mt-1">
+                      선택한 파일들을 순차적으로 변환합니다
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleBatchTranscribe}
+                    disabled={isTranscribing || isCompressing}
+                    className="bg-gradient-to-r from-purple-600 to-blue-600 text-white py-2.5 px-6 rounded-lg font-medium hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md"
+                  >
+                    {isTranscribing ? '일괄 변환 중...' : '일괄 변환 시작'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 선택된 파일 정보 */}
@@ -515,14 +1077,26 @@ export default function Home() {
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold text-gray-900">{selectedSession.fileName}</h2>
                 <span className="text-sm text-gray-500">
-                  {(selectedSession.file.size / 1024 / 1024).toFixed(2)}MB
+                  {selectedSession.file ? `${(selectedSession.file.size / 1024 / 1024).toFixed(2)}MB` : '파일 정보 없음'}
                 </span>
               </div>
+
+              {/* 오디오 플레이어 */}
+              {selectedSession.file && (
+                <div className="mb-4 p-4 bg-gray-50 rounded-lg">
+                  <p className="text-sm font-medium text-gray-700 mb-2">🎵 녹음 파일 재생</p>
+                  <audio
+                    controls
+                    className="w-full"
+                    src={URL.createObjectURL(selectedSession.file)}
+                  />
+                </div>
+              )}
 
               <div className="flex gap-3 mb-4">
                 <button
                   onClick={handleTranscribe}
-                  disabled={isTranscribing || isCompressing || selectedSession.status === 'transcribing'}
+                  disabled={!selectedSession.file || isTranscribing || isCompressing || selectedSession.status === 'transcribing'}
                   className="flex-1 bg-blue-600 text-white py-2.5 px-4 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors text-sm"
                 >
                   {selectedSession.status === 'transcribing' ? '변환 중...' : '텍스트로 변환'}
@@ -544,13 +1118,13 @@ export default function Home() {
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleCopy('transcription')}
-                        className="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded"
+                        className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded font-medium transition-colors"
                       >
-                        {copySuccess ? '✓ 복사됨' : '복사'}
+                        {copySuccess === 'transcription' ? '✓ 복사됨' : '복사'}
                       </button>
                       <button
                         onClick={() => handleDownload('transcription')}
-                        className="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded"
+                        className="text-sm bg-gray-700 hover:bg-gray-800 text-white px-3 py-1.5 rounded font-medium transition-colors"
                       >
                         다운로드
                       </button>
@@ -572,13 +1146,13 @@ export default function Home() {
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleCopy('minutes')}
-                        className="text-sm bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded"
+                        className="text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded font-medium transition-colors"
                       >
-                        {copySuccess ? '✓ 복사됨' : '복사'}
+                        {copySuccess === 'minutes' ? '✓ 복사됨' : '복사'}
                       </button>
                       <button
                         onClick={() => handleDownload('minutes')}
-                        className="text-sm bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded"
+                        className="text-sm bg-gray-700 hover:bg-gray-800 text-white px-3 py-1.5 rounded font-medium transition-colors"
                       >
                         다운로드
                       </button>

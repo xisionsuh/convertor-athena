@@ -5,13 +5,38 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+const MAX_TEXT_LENGTH = 50000; // 약 50,000자
+
 export async function POST(request: NextRequest) {
   try {
+    // API 키 확인
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('OPENAI_API_KEY is not set');
+      return NextResponse.json(
+        { error: 'API 키가 설정되지 않았습니다. .env.local 파일을 확인해주세요.' },
+        { status: 500 }
+      );
+    }
+
     const { text } = await request.json();
 
     if (!text) {
       return NextResponse.json(
         { error: '텍스트가 제공되지 않았습니다.' },
+        { status: 400 }
+      );
+    }
+
+    if (typeof text !== 'string') {
+      return NextResponse.json(
+        { error: '올바른 텍스트 형식이 아닙니다.' },
+        { status: 400 }
+      );
+    }
+
+    if (text.length > MAX_TEXT_LENGTH) {
+      return NextResponse.json(
+        { error: `텍스트가 너무 깁니다. 최대 ${MAX_TEXT_LENGTH}자까지 처리 가능합니다.` },
         { status: 400 }
       );
     }
@@ -61,11 +86,35 @@ export async function POST(request: NextRequest) {
 
     const minutes = completion.choices[0]?.message?.content || '';
 
+    if (!minutes) {
+      return NextResponse.json(
+        { error: '회의록 생성에 실패했습니다. 다시 시도해주세요.' },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({ minutes });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Summarization error:', error);
+
+    // OpenAI API 에러 처리
+    if (error && typeof error === 'object' && 'status' in error) {
+      const apiError = error as { status?: number; message?: string };
+      if (apiError.status === 401) {
+        return NextResponse.json(
+          { error: 'API 키가 유효하지 않습니다.' },
+          { status: 401 }
+        );
+      } else if (apiError.status === 429) {
+        return NextResponse.json(
+          { error: '요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.' },
+          { status: 429 }
+        );
+      }
+    }
+
     return NextResponse.json(
-      { error: '회의록 생성 중 오류가 발생했습니다.' },
+      { error: '회의록 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' },
       { status: 500 }
     );
   }

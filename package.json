@@ -2,11 +2,53 @@
   "name": "meeting-transcriber",
   "version": "0.1.0",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3001",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "start": "next start -p 3001",
+    "lint": "eslint",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf .next dist node_modules/.cache",
+    "electron:dev": "concurrently \"cross-env BROWSER=none npm run dev\" \"wait-on http://localhost:3001 && electron .\"",
+    "electron:build": "npm run build && electron-builder --mac",
+    "electron:build:all": "npm run build && electron-builder --mac --win --linux",
+    "postinstall": "electron-builder install-app-deps",
+    "tauri:dev": "npm run dev & npx tauri dev",
+    "tauri:build": "npx tauri build"
+  },
+  "build": {
+    "appId": "com.meetingtranscriber.app",
+    "productName": "회의녹음변환기",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      ".next/standalone/**/*",
+      "public/**/*",
+      ".next/static/**/*",
+      "package.json",
+      ".env.local",
+      "!node_modules/@img/sharp-darwin-x64/**"
+    ],
+    "asar": false,
+    "mac": {
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "extraResources": []
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.15",
@@ -14,17 +56,25 @@
     "next": "15.5.6",
     "openai": "^6.5.0",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "sharp": "^0.34.4"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
+    "@tauri-apps/api": "^2.9.0",
+    "@tauri-apps/cli": "^2.9.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^38.4.0",
+    "electron-builder": "^26.0.12",
     "eslint": "^9",
     "eslint-config-next": "15.5.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wait-on": "^9.0.1"
   }
 }

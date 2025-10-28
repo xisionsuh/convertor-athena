@@ -19,10 +19,14 @@
 
 # production
 /build
+/dist
 
 # misc
 .DS_Store
 *.pem
+
+# electron
+electron-builder.yml
 
 # debug
 npm-debug.log*
@@ -39,3 +43,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# tauri
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# screenshots
+*.png
+
+# logs
+*.log
