@@ -182,6 +182,8 @@ function createWindow() {
       sandbox: true,
       // 보안 강화: 외부 콘텐츠 차단
       allowRunningInsecureContent: false,
+      // 프로덕션 모드에서 DevTools 비활성화 (크래시 방지)
+      devTools: app.isPackaged ? false : true,
       // 프로파일링 비활성화 (크래시 방지)
       enableWebSQL: false,
       enableBlinkFeatures: '',
@@ -236,11 +238,14 @@ function createWindow() {
 }
 
 // 앱 시작 전 크래시 방지 설정 (app.whenReady() 전에 호출되어야 함)
+// V8 프로파일링 비활성화 (더 구체적인 방법)
+app.commandLine.appendSwitch('no-profiling');
+// 개발자 도구 관련 크래시 방지
 app.commandLine.appendSwitch('disable-dev-shm-usage');
 // Inspector 비활성화 (크래시 방지)
 app.commandLine.appendSwitch('disable-background-networking');
-// V8 프로파일링 비활성화 (안전한 옵션만 사용)
-app.commandLine.appendSwitch('js-flags', '--no-lazy');
+// V8 옵티마이저 설정 (크래시 방지)
+app.commandLine.appendSwitch('js-flags', '--no-lazy --no-expose-gc --max-old-space-size=4096');
 
 app.whenReady().then(() => {
   // Content Security Policy 설정 (보안 경고 해결)
