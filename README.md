@@ -57,7 +57,7 @@ OPENAI_API_KEY=your-api-key-here
 ```bash
 npm run dev
 ```
-브라우저에서 http://localhost:3001 접속
+브라우저에서 http://localhost:4000 접속
 
 #### Electron 앱
 ```bash

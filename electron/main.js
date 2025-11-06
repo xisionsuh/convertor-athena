@@ -4,9 +4,14 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 
 // V8 프로파일링 및 Inspector 비활성화 (크래시 방지)
+// 환경 변수 설정 (app.commandLine.appendSwitch 전에 설정해야 함)
+process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
+process.env.V8_COMPILE_HINTS_DISABLE = '1';
+process.env.V8_ENABLE_COMPILE_HINTS = '0';
+process.env.V8_COMPILE_HINTS_OFF = '1';
+
 if (app.isPackaged) {
   // 프로덕션 모드에서 디버깅 기능 비활성화
-  process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
   // Node.js Inspector 비활성화
   if (process.env.NODE_OPTIONS) {
     process.env.NODE_OPTIONS = process.env.NODE_OPTIONS.replace(/--inspect[^ ]*/g, '').trim();
@@ -79,12 +84,16 @@ function startNextServer() {
   // Next.js standalone 서버 시작
   const serverEnv = {
     ...process.env,
-    PORT: '3001',
+    PORT: '4000',
     HOSTNAME: 'localhost',
     NODE_ENV: 'production',
     // Inspector 및 프로파일링 비활성화
     NODE_OPTIONS: '',
-    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+    // V8 컴파일 힌트 비활성화
+    V8_COMPILE_HINTS_DISABLE: '1',
+    V8_ENABLE_COMPILE_HINTS: '0',
+    V8_COMPILE_HINTS_OFF: '1'
   };
   
   // NODE_OPTIONS에서 inspect 관련 옵션 제거
@@ -92,7 +101,17 @@ function startNextServer() {
     serverEnv.NODE_OPTIONS = serverEnv.NODE_OPTIONS.replace(/--inspect[^ ]*/g, '').trim();
   }
   
-  nextServer = spawn(process.execPath, [standaloneServerPath], {
+  // Electron의 execPath를 사용하되, V8 플래그를 추가하여 크래시 방지
+  const nodeArgs = [
+    '--no-profiling',
+    '--no-turbo-profiling',
+    '--no-trace-ic',
+    '--no-compile-hints',
+    '--no-compile-hints-collection',
+    standaloneServerPath
+  ];
+  
+  nextServer = spawn(process.execPath, nodeArgs, {
     cwd: standaloneDir,
     env: serverEnv,
     stdio: ['ignore', 'pipe', 'pipe']
@@ -204,9 +223,10 @@ function createWindow() {
   const isDev = !app.isPackaged;
 
   if (isDev) {
-    // 개발 모드: localhost:3001 연결
-    mainWindow.loadURL('http://localhost:3001');
-    mainWindow.webContents.openDevTools();
+    // 개발 모드: localhost:4000 연결
+    mainWindow.loadURL('http://localhost:4000');
+    // 개발자 도구 자동 열림 비활성화 (원하면 주석 해제)
+    // mainWindow.webContents.openDevTools();
   } else {
     // 프로덕션 모드: Next.js standalone 서버 시작
     startNextServer();
@@ -214,7 +234,7 @@ function createWindow() {
     // 서버가 준비될 때까지 대기 후 로드
     waitForServer().then(ready => {
       if (ready) {
-        mainWindow.loadURL('http://localhost:3001').catch(err => {
+        mainWindow.loadURL('http://localhost:4000').catch(err => {
           safeWarn('Failed to load URL: ' + err.message);
         });
       } else {
@@ -238,19 +258,20 @@ function createWindow() {
 }
 
 // 앱 시작 전 크래시 방지 설정 (app.whenReady() 전에 호출되어야 함)
-// V8 프로파일링 비활성화 (더 구체적인 방법)
+// V8 프로파일링 완전 비활성화 (크래시 방지)
 app.commandLine.appendSwitch('no-profiling');
-// 개발자 도구 관련 크래시 방지
-app.commandLine.appendSwitch('disable-dev-shm-usage');
-// Inspector 비활성화 (크래시 방지)
 app.commandLine.appendSwitch('disable-background-networking');
-// V8 옵티마이저 설정 (크래시 방지)
-app.commandLine.appendSwitch('js-flags', '--no-lazy --no-expose-gc --max-old-space-size=4096');
+app.commandLine.appendSwitch('disable-dev-shm-usage');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-features', 'VizDisplayCompositor');
+// V8 옵티마이저 설정 (크래시 방지) - 프로파일링 및 컴파일 힌트 관련 기능 완전 비활성화
+app.commandLine.appendSwitch('js-flags', '--no-lazy --no-expose-gc --max-old-space-size=4096 --no-turbo-profiling --no-trace-ic --no-compile-hints --no-compile-hints-collection');
 
 app.whenReady().then(() => {
   // Content Security Policy 설정 (보안 경고 해결)
   const filter = {
-    urls: ['http://localhost:3001/*', 'http://127.0.0.1:3001/*']
+    urls: ['http://localhost:4000/*', 'http://127.0.0.1:4000/*']
   };
 
   session.defaultSession.webRequest.onHeadersReceived(filter, (details, callback) => {
@@ -258,12 +279,12 @@ app.whenReady().then(() => {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: http://localhost:3001 http://127.0.0.1:3001 https://unpkg.com https://api.openai.com https://*.openai.com; " +
+          "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: http://localhost:4000 http://127.0.0.1:4000 https://unpkg.com https://api.openai.com https://*.openai.com; " +
           "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; " +
           "style-src 'self' 'unsafe-inline'; " +
           "img-src 'self' data: blob:; " +
           "font-src 'self' data:; " +
-          "connect-src 'self' http://localhost:3001 http://127.0.0.1:3001 https://api.openai.com https://*.openai.com ws://localhost:*;"
+          "connect-src 'self' http://localhost:4000 http://127.0.0.1:4000 https://api.openai.com https://*.openai.com ws://localhost:*;"
         ]
       }
     });
