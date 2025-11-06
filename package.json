@@ -30,7 +30,8 @@
       ".next/static/**/*",
       "package.json",
       ".env.local",
-      "!node_modules/@img/sharp-darwin-x64/**"
+      "!node_modules/@img/sharp-darwin-x64/**",
+      "!node_modules/@img/sharp-libvips-darwin-x64/**"
     ],
     "asar": false,
     "mac": {

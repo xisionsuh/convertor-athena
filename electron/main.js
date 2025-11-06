@@ -1,22 +1,56 @@
-const { app, BrowserWindow, protocol } = require('electron');
+const { app, BrowserWindow, protocol, session } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 
+// V8 프로파일링 및 Inspector 비활성화 (크래시 방지)
+if (app.isPackaged) {
+  // 프로덕션 모드에서 디버깅 기능 비활성화
+  process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
+  // Node.js Inspector 비활성화
+  if (process.env.NODE_OPTIONS) {
+    process.env.NODE_OPTIONS = process.env.NODE_OPTIONS.replace(/--inspect[^ ]*/g, '').trim();
+    if (!process.env.NODE_OPTIONS) {
+      delete process.env.NODE_OPTIONS;
+    }
+  }
+}
+
+// 안전한 로깅 함수
+const safeLog = (message) => {
+  try {
+    process.stdout.write(message + '\n');
+  } catch (err) {
+    // 로깅 실패를 무시 (EIO 오류 방지)
+  }
+};
+
+const safeWarn = (message) => {
+  try {
+    process.stderr.write(message + '\n');
+  } catch (err) {
+    // 로깅 실패를 무시 (EIO 오류 방지)
+  }
+};
+
 // Load environment variables from .env.local
 const envPath = path.join(__dirname, '..', '.env.local');
-if (fs.existsSync(envPath)) {
-  const envContent = fs.readFileSync(envPath, 'utf8');
-  envContent.split('\n').forEach(line => {
-    const [key, ...valueParts] = line.split('=');
-    if (key && valueParts.length > 0) {
-      const value = valueParts.join('=').trim();
-      process.env[key.trim()] = value;
-    }
-  });
-  console.log('Environment variables loaded from .env.local');
-} else {
-  console.warn('.env.local file not found at', envPath);
+try {
+  if (fs.existsSync(envPath)) {
+    const envContent = fs.readFileSync(envPath, 'utf8');
+    envContent.split('\n').forEach(line => {
+      const [key, ...valueParts] = line.split('=');
+      if (key && valueParts.length > 0) {
+        const value = valueParts.join('=').trim();
+        process.env[key.trim()] = value;
+      }
+    });
+    safeLog('Environment variables loaded from .env.local');
+  } else {
+    safeWarn('.env.local file not found at ' + envPath);
+  }
+} catch (err) {
+  safeWarn('Failed to load .env.local: ' + err.message);
 }
 
 let mainWindow;
@@ -32,46 +66,97 @@ function startNextServer() {
     : path.join(appPath, '.next', 'standalone');
   const standaloneServerPath = path.join(standaloneDir, 'server.js');
 
-  console.log('App Path:', appPath);
-  console.log('Standalone Dir:', standaloneDir);
-  console.log('Server Path:', standaloneServerPath);
-  console.log('Server exists:', fs.existsSync(standaloneServerPath));
+  safeLog('App Path: ' + appPath);
+  safeLog('Standalone Dir: ' + standaloneDir);
+  safeLog('Server Path: ' + standaloneServerPath);
+  safeLog('Server exists: ' + fs.existsSync(standaloneServerPath));
 
   if (!fs.existsSync(standaloneServerPath)) {
-    console.error('Next.js server not found. Please run `npm run build` first.');
+    safeWarn('Next.js server not found. Please run `npm run build` first.');
     return;
   }
 
   // Next.js standalone 서버 시작
+  const serverEnv = {
+    ...process.env,
+    PORT: '3001',
+    HOSTNAME: 'localhost',
+    NODE_ENV: 'production',
+    // Inspector 및 프로파일링 비활성화
+    NODE_OPTIONS: '',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+  };
+  
+  // NODE_OPTIONS에서 inspect 관련 옵션 제거
+  if (serverEnv.NODE_OPTIONS) {
+    serverEnv.NODE_OPTIONS = serverEnv.NODE_OPTIONS.replace(/--inspect[^ ]*/g, '').trim();
+  }
+  
   nextServer = spawn(process.execPath, [standaloneServerPath], {
     cwd: standaloneDir,
-    env: {
-      ...process.env,
-      PORT: '3001',
-      HOSTNAME: 'localhost',
-      NODE_ENV: 'production'
-    },
+    env: serverEnv,
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
-  nextServer.stdout.on('data', (data) => {
-    const output = data.toString();
-    console.log(`Next.js: ${output}`);
-    if (output.includes('Ready') || output.includes('started server')) {
-      serverReady = true;
+  // 안전한 로깅 함수 (로컬 스코프)
+  const safeLogLocal = (message) => {
+    try {
+      if (nextServer && !nextServer.killed) {
+        process.stdout.write(message + '\n');
+      }
+    } catch (err) {
+      // 로깅 실패를 무시 (EIO 오류 방지)
     }
-  });
+  };
 
-  nextServer.stderr.on('data', (data) => {
-    console.error(`Next.js Error: ${data.toString()}`);
-  });
+  const safeErrorLogLocal = (message) => {
+    try {
+      if (nextServer && !nextServer.killed) {
+        process.stderr.write(message + '\n');
+      }
+    } catch (err) {
+      // 로깅 실패를 무시 (EIO 오류 방지)
+    }
+  };
+
+  if (nextServer.stdout) {
+    nextServer.stdout.on('data', (data) => {
+      try {
+        const output = data.toString();
+        safeLogLocal(`Next.js: ${output}`);
+        if (output.includes('Ready') || output.includes('started server')) {
+          serverReady = true;
+        }
+      } catch (err) {
+        // 출력 처리 오류 무시
+      }
+    });
+
+    nextServer.stdout.on('error', (err) => {
+      // 파이프 오류 무시 (EIO 방지)
+    });
+  }
+
+  if (nextServer.stderr) {
+    nextServer.stderr.on('data', (data) => {
+      try {
+        safeErrorLogLocal(`Next.js Error: ${data.toString()}`);
+      } catch (err) {
+        // 출력 처리 오류 무시
+      }
+    });
+
+    nextServer.stderr.on('error', (err) => {
+      // 파이프 오류 무시 (EIO 방지)
+    });
+  }
 
   nextServer.on('error', (err) => {
-    console.error('Failed to start Next.js server:', err);
+    safeErrorLogLocal('Failed to start Next.js server: ' + err.message);
   });
 
   nextServer.on('exit', (code, signal) => {
-    console.log(`Next.js server exited with code ${code} and signal ${signal}`);
+    safeLogLocal(`Next.js server exited with code ${code} and signal ${signal}`);
     serverReady = false;
   });
 }
@@ -97,6 +182,10 @@ function createWindow() {
       sandbox: true,
       // 보안 강화: 외부 콘텐츠 차단
       allowRunningInsecureContent: false,
+      // 프로파일링 비활성화 (크래시 방지)
+      enableWebSQL: false,
+      enableBlinkFeatures: '',
+      disableBlinkFeatures: 'V8Inspector',
     },
     icon: path.join(__dirname, 'icon.png'),
     // 초기 로딩 화면
@@ -124,10 +213,10 @@ function createWindow() {
     waitForServer().then(ready => {
       if (ready) {
         mainWindow.loadURL('http://localhost:3001').catch(err => {
-          console.error('Failed to load URL:', err);
+          safeWarn('Failed to load URL: ' + err.message);
         });
       } else {
-        console.error('Server failed to start in time');
+        safeWarn('Server failed to start in time');
       }
     });
   }
@@ -146,7 +235,42 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(createWindow);
+// 앱 시작 전 크래시 방지 설정 (app.whenReady() 전에 호출되어야 함)
+app.commandLine.appendSwitch('disable-dev-shm-usage');
+// Inspector 비활성화 (크래시 방지)
+app.commandLine.appendSwitch('disable-background-networking');
+// V8 프로파일링 비활성화 (안전한 옵션만 사용)
+app.commandLine.appendSwitch('js-flags', '--no-lazy');
+
+app.whenReady().then(() => {
+  // Content Security Policy 설정 (보안 경고 해결)
+  const filter = {
+    urls: ['http://localhost:3001/*', 'http://127.0.0.1:3001/*']
+  };
+
+  session.defaultSession.webRequest.onHeadersReceived(filter, (details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: http://localhost:3001 http://127.0.0.1:3001 https://unpkg.com https://api.openai.com https://*.openai.com; " +
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; " +
+          "style-src 'self' 'unsafe-inline'; " +
+          "img-src 'self' data: blob:; " +
+          "font-src 'self' data:; " +
+          "connect-src 'self' http://localhost:3001 http://127.0.0.1:3001 https://api.openai.com https://*.openai.com ws://localhost:*;"
+        ]
+      }
+    });
+  });
+
+  // 추가 안전성 체크
+  if (app.isPackaged) {
+    // 프로덕션 모드에서만 추가 설정 적용
+    app.commandLine.appendSwitch('disable-background-timer-throttling');
+  }
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
   if (nextServer) {

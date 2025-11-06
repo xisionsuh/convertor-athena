@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -16,17 +16,18 @@ export const metadata: Metadata = {
   title: "회의녹음변환기",
   description: "OpenAI Whisper를 이용한 회의 녹음 음성-텍스트 변환 및 회의록 자동 생성",
   manifest: "/manifest.json",
-  themeColor: "#3b82f6",
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    maximumScale: 1,
-  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
     title: "회의녹음변환기",
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  themeColor: "#3b82f6",
 };
 
 export default function RootLayout({
