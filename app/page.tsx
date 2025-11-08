@@ -240,31 +240,31 @@ export default function Home() {
   // localStorage에서 세션 복원
   useEffect(() => {
     try {
-      const savedSessions = localStorage.getItem('meeting-sessions');
-      if (savedSessions) {
-        try {
-          const parsed = JSON.parse(savedSessions);
+    const savedSessions = localStorage.getItem('meeting-sessions');
+    if (savedSessions) {
+      try {
+        const parsed = JSON.parse(savedSessions);
           // 배열인지 확인
           if (Array.isArray(parsed) && parsed.length > 0) {
-            // File 객체는 저장할 수 없으므로, 기본 정보만 복원
-            const restoredSessions = parsed.map((s: FileSession) => ({
-              ...s,
-              file: null, // File 객체는 복원 불가
+        // File 객체는 저장할 수 없으므로, 기본 정보만 복원
+        const restoredSessions = parsed.map((s: FileSession) => ({
+          ...s,
+          file: null, // File 객체는 복원 불가
               createdAt: s.createdAt ? new Date(s.createdAt) : new Date(),
-              // 변환 중 상태였다면 대기 상태로 리셋 (페이지 새로고침 후 멈춰있는 파일 방지)
+          // 변환 중 상태였다면 대기 상태로 리셋 (페이지 새로고침 후 멈춰있는 파일 방지)
               status: s.status === 'transcribing' ? 'pending' : (s.status || 'pending'),
               transcription: s.transcription || '',
               minutes: s.minutes || '',
               chunks: s.chunks || [],
-            }));
-            setSessions(restoredSessions);
+        }));
+        setSessions(restoredSessions);
             console.log(`세션 ${restoredSessions.length}개 복원 완료`);
           }
-        } catch (error) {
+      } catch (error) {
           console.error('세션 데이터 파싱 실패:', error);
           // 손상된 데이터는 삭제
           localStorage.removeItem('meeting-sessions');
-        }
+      }
       }
     } catch (error) {
       console.error('localStorage 접근 실패:', error);
@@ -482,26 +482,26 @@ export default function Home() {
     formData.append('file', fileToTranscribe);
 
     try {
-      const response = await fetch('/api/transcribe', {
-        method: 'POST',
-        body: formData,
-      });
+    const response = await fetch('/api/transcribe', {
+      method: 'POST',
+      body: formData,
+    });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: `서버 오류 (${response.status})` }));
         throw new Error(errorData.error || `서버 오류: ${response.status}`);
       }
 
-      const data = await response.json();
-      if (data.error) {
-        throw new Error(data.error);
-      }
+    const data = await response.json();
+    if (data.error) {
+      throw new Error(data.error);
+    }
       
       if (!data.text || data.text.trim() === '') {
         throw new Error('변환된 텍스트가 비어있습니다.');
       }
       
-      return data.text;
+    return data.text;
     } catch (error) {
       if (error instanceof Error) {
         throw error;
@@ -573,7 +573,7 @@ export default function Home() {
       if (existingSession) {
         // 기존 세션 상태 업데이트
         return prev.map(s =>
-          s.id === sessionId ? { ...s, status: 'transcribing' as const } : s
+      s.id === sessionId ? { ...s, status: 'transcribing' as const } : s
         );
       } else {
         // 세션이 없으면 추가 (세션 객체를 직접 받은 경우)
@@ -1239,7 +1239,7 @@ export default function Home() {
 
       {/* 사이드바 */}
       {isMounted && (
-        <div className={`${sidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 bg-white shadow-lg overflow-hidden flex flex-col`}>
+      <div className={`${sidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 bg-white shadow-lg overflow-hidden flex flex-col`}>
         <div className="p-4 border-b space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-900">파일 목록</h2>
@@ -1425,7 +1425,7 @@ export default function Home() {
                 </div>
               </div>
             </div>
-              ))}
+          ))}
             </div>
           )}
 
@@ -1494,10 +1494,11 @@ export default function Home() {
             </div>
           )}
         </div>
-        </div>
+      </div>
       )}
 
       {/* 사이드바 토글 버튼 */}
+      {isMounted && (
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
         className="absolute left-0 top-1/2 -translate-y-1/2 bg-white shadow-md p-2 rounded-r-lg hover:bg-gray-50 z-10"
@@ -1505,15 +1506,17 @@ export default function Home() {
       >
         {sidebarOpen ? '◀' : '▶'}
       </button>
+      )}
 
       {/* 메인 콘텐츠 영역 - 메모장이 기본 */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* 메모 패널 - 기본적으로 열려있고 메인 영역 차지 */}
-        <div className={`${memoPanelOpen ? 'flex-1' : 'w-0'} transition-all duration-300 bg-white shadow-lg overflow-hidden flex flex-col`}>
+      {isMounted && (
+        <div className="flex-1 flex overflow-hidden">
+          {/* 메모 패널 - 기본적으로 열려있고 메인 영역 차지 */}
+          <div className={`${memoPanelOpen ? 'flex-1' : 'w-0'} transition-all duration-300 bg-white shadow-lg overflow-hidden flex flex-col`}>
           <div className="p-4 border-b flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-900">📝 메모장</h2>
             <div className="flex gap-2">
-              <button
+                <button
                 onClick={() => {
                   if (selectedMemoId) {
                     saveMemo();
@@ -1524,7 +1527,7 @@ export default function Home() {
                 className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
               >
                 {selectedMemoId ? '저장' : '새 메모'}
-              </button>
+                </button>
               {selectedMemoId && (
                 <>
                   <button
@@ -1545,23 +1548,23 @@ export default function Home() {
                   </button>
                 </>
               )}
-              <button
+                  <button
                 onClick={() => setMemoPanelOpen(false)}
                 className="text-gray-400 hover:text-gray-600"
               >
                 ×
-              </button>
-            </div>
+                  </button>
+                </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ minHeight: 'calc(100vh - 120px)' }}>
             {selectedMemoId ? (
               <>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
                     제목
-                  </label>
-                  <input
+            </label>
+            <input
                     type="text"
                     value={memoTitle}
                     onChange={(e) => setMemoTitle(e.target.value)}
@@ -1602,11 +1605,11 @@ export default function Home() {
               </div>
             )}
           </div>
-        </div>
+          </div>
 
-        {/* 파일 정보 패널 (선택 시에만 오른쪽에 표시) */}
-        {selectedSession && (
-          <div className="w-96 bg-white border-l border-gray-200 shadow-lg overflow-y-auto p-6">
+          {/* 파일 정보 패널 (선택 시에만 오른쪽에 표시) */}
+          {selectedSession && (
+            <div className="w-96 bg-white border-l border-gray-200 shadow-lg overflow-y-auto p-6">
               {/* 변환 진행 상태 표시 */}
               {(isTranscribing || compressionProgress || selectedSession.status === 'transcribing') && (
                 <div className="mb-4 p-4 bg-blue-50 rounded-lg border-2 border-blue-300">
@@ -1618,18 +1621,18 @@ export default function Home() {
                       </p>
                       <p className="text-blue-600 text-sm mt-1">
                         잠시만 기다려주세요. 완료되면 자동으로 표시됩니다.
-                      </p>
-                    </div>
+                    </p>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold text-gray-900">{selectedSession.fileName}</h2>
                 <div className="flex items-center gap-3">
-                  <span className="text-sm text-gray-500">
-                    {selectedSession.file ? `${(selectedSession.file.size / 1024 / 1024).toFixed(2)}MB` : '파일 정보 없음'}
-                  </span>
+                <span className="text-sm text-gray-500">
+                  {selectedSession.file ? `${(selectedSession.file.size / 1024 / 1024).toFixed(2)}MB` : '파일 정보 없음'}
+                </span>
                   {selectedSession.status === 'transcribing' && (
                     <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full font-medium animate-pulse">
                       변환 중...
@@ -1730,6 +1733,7 @@ export default function Home() {
             </div>
           )}
         </div>
+      )}
       </div>
     </div>
   );
