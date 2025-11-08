@@ -110,38 +110,62 @@ export default function Home() {
 
   // localStorage에서 세션 복원
   useEffect(() => {
-    const savedSessions = localStorage.getItem('meeting-sessions');
-    if (savedSessions) {
-      try {
-        const parsed = JSON.parse(savedSessions);
-        // File 객체는 저장할 수 없으므로, 기본 정보만 복원
-        const restoredSessions = parsed.map((s: FileSession) => ({
-          ...s,
-          file: null, // File 객체는 복원 불가
-          createdAt: new Date(s.createdAt),
-          // 변환 중 상태였다면 대기 상태로 리셋 (페이지 새로고침 후 멈춰있는 파일 방지)
-          status: s.status === 'transcribing' ? 'pending' : s.status,
-        }));
-        setSessions(restoredSessions);
-      } catch (error) {
-        console.error('Failed to restore sessions:', error);
+    try {
+      const savedSessions = localStorage.getItem('meeting-sessions');
+      if (savedSessions) {
+        try {
+          const parsed = JSON.parse(savedSessions);
+          // 배열인지 확인
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            // File 객체는 저장할 수 없으므로, 기본 정보만 복원
+            const restoredSessions = parsed.map((s: FileSession) => ({
+              ...s,
+              file: null, // File 객체는 복원 불가
+              createdAt: s.createdAt ? new Date(s.createdAt) : new Date(),
+              // 변환 중 상태였다면 대기 상태로 리셋 (페이지 새로고침 후 멈춰있는 파일 방지)
+              status: s.status === 'transcribing' ? 'pending' : (s.status || 'pending'),
+              transcription: s.transcription || '',
+              minutes: s.minutes || '',
+              chunks: s.chunks || [],
+            }));
+            setSessions(restoredSessions);
+            console.log(`세션 ${restoredSessions.length}개 복원 완료`);
+          }
+        } catch (error) {
+          console.error('세션 데이터 파싱 실패:', error);
+          // 손상된 데이터는 삭제
+          localStorage.removeItem('meeting-sessions');
+        }
       }
+    } catch (error) {
+      console.error('localStorage 접근 실패:', error);
     }
   }, []);
 
   // 세션이 변경될 때마다 localStorage에 저장
   useEffect(() => {
-    if (sessions.length > 0) {
+    try {
       // File 객체를 제외하고 저장
       const sessionsToSave = sessions.map(s => ({
-        ...s,
+        id: s.id,
+        fileName: s.fileName,
         file: s.file ? {
           name: s.file.name,
           size: s.file.size,
           type: s.file.type,
         } : null,
+        transcription: s.transcription || '',
+        minutes: s.minutes || '',
+        chunks: s.chunks || [],
+        status: s.status,
+        createdAt: s.createdAt,
       }));
+      
+      // 빈 배열도 저장 (명시적으로 초기화)
       localStorage.setItem('meeting-sessions', JSON.stringify(sessionsToSave));
+    } catch (error) {
+      console.error('localStorage 저장 실패:', error);
+      // 저장 실패해도 앱은 계속 작동
     }
   }, [sessions]);
 
@@ -320,16 +344,33 @@ export default function Home() {
     const formData = new FormData();
     formData.append('file', fileToTranscribe);
 
-    const response = await fetch('/api/transcribe', {
-      method: 'POST',
-      body: formData,
-    });
+    try {
+      const response = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      });
 
-    const data = await response.json();
-    if (data.error) {
-      throw new Error(data.error);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: `서버 오류 (${response.status})` }));
+        throw new Error(errorData.error || `서버 오류: ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      
+      if (!data.text || data.text.trim() === '') {
+        throw new Error('변환된 텍스트가 비어있습니다.');
+      }
+      
+      return data.text;
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error('네트워크 오류가 발생했습니다. 인터넷 연결을 확인해주세요.');
     }
-    return data.text;
   };
 
   // 여러 파일 일괄 변환
@@ -368,20 +409,50 @@ export default function Home() {
   };
 
   // 단일 세션 변환 (기존 로직 분리)
-  const transcribeSingleSession = async (sessionId: string) => {
-    const session = sessions.find(s => s.id === sessionId);
-    if (!session || !session.file) return;
+  const transcribeSingleSession = async (sessionIdOrSession: string | FileSession) => {
+    // 세션 ID인지 세션 객체인지 확인
+    let session: FileSession | undefined;
+    let sessionId: string;
+    
+    if (typeof sessionIdOrSession === 'string') {
+      // 세션 ID로 찾기
+      session = sessions.find(s => s.id === sessionIdOrSession);
+      sessionId = sessionIdOrSession;
+    } else {
+      // 세션 객체 직접 사용
+      session = sessionIdOrSession;
+      sessionId = session.id;
+    }
+    
+    if (!session || !session.file) {
+      throw new Error('세션이나 파일을 찾을 수 없습니다.');
+    }
 
     const maxSize = 25 * 1024 * 1024; // 25MB
 
-    // 세션 상태 업데이트
-    setSessions(prev => prev.map(s =>
-      s.id === sessionId ? { ...s, status: 'transcribing' as const } : s
-    ));
+    // 세션 상태 업데이트 (세션이 없으면 추가, 있으면 상태만 업데이트)
+    setSessions(prev => {
+      const existingSession = prev.find(s => s.id === sessionId);
+      if (existingSession) {
+        // 기존 세션 상태 업데이트
+        return prev.map(s =>
+          s.id === sessionId ? { ...s, status: 'transcribing' as const } : s
+        );
+      } else {
+        // 세션이 없으면 추가 (세션 객체를 직접 받은 경우)
+        return [...prev, { ...session, status: 'transcribing' as const }];
+      }
+    });
 
     try {
       // 파일이 25MB보다 크면 분할 처리
       if (session.file.size > maxSize) {
+        setCompressionProgress('파일이 큽니다. 분할 처리 중...');
+        showToast(
+          `파일 크기 ${(session.file.size / 1024 / 1024).toFixed(2)}MB - 10분 단위로 자동 분할하여 변환합니다.`,
+          'info'
+        );
+
         // 파일 분할
         const chunks = await splitAudioIntoChunks(session.file);
 
@@ -389,11 +460,14 @@ export default function Home() {
           throw new Error('파일 분할 실패');
         }
 
+        showToast(`파일이 ${chunks.length}개로 분할되었습니다. 순차 변환을 시작합니다.`, 'info');
+
         // 각 청크를 순차적으로 변환
         let fullTranscription = '';
         const chunkSessions: { id: string; name: string; transcription: string }[] = [];
 
         for (let i = 0; i < chunks.length; i++) {
+          setCompressionProgress(`${i + 1}/${chunks.length} 파일 변환 중...`);
           try {
             const chunkText = await transcribeFile(chunks[i]);
             fullTranscription += `\n\n${chunkText}`;
@@ -404,8 +478,12 @@ export default function Home() {
             });
           } catch (error) {
             console.error(`Chunk ${i + 1} error:`, error);
+            const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
+            showToast(`${i + 1}번째 파트 변환 중 오류 발생: ${errorMessage}`, 'error');
           }
         }
+
+        setCompressionProgress('');
 
         // 세션 업데이트
         setSessions(prev => prev.map(s =>
@@ -415,7 +493,9 @@ export default function Home() {
         ));
       } else {
         // 일반 변환
+        setCompressionProgress('음성 파일 변환 중...');
         const text = await transcribeFile(session.file);
+        setCompressionProgress('');
 
         // 세션 업데이트
         setSessions(prev => prev.map(s =>
@@ -425,7 +505,10 @@ export default function Home() {
         ));
       }
     } catch (error) {
-      console.error('Error:', error);
+      console.error('Transcribe error:', error);
+      setCompressionProgress('');
+      const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다.';
+      showToast(`변환 오류: ${errorMessage}`, 'error');
       setSessions(prev => prev.map(s =>
         s.id === sessionId ? { ...s, status: 'error' as const } : s
       ));
@@ -724,8 +807,24 @@ export default function Home() {
 
           // 자동 변환
           if (autoTranscribe) {
-            setTimeout(() => {
-              transcribeSingleSession(newSession.id);
+            // 세션 객체를 직접 전달하여 상태 업데이트 지연 문제 해결
+            setTimeout(async () => {
+              try {
+                setIsTranscribing(true);
+                showToast('음성 변환을 시작합니다...', 'info');
+                // 세션 객체를 직접 전달 (상태 업데이트 대기 불필요)
+                await transcribeSingleSession(newSession);
+                showToast('음성 변환이 완료되었습니다!', 'success');
+              } catch (error) {
+                console.error('Auto transcribe error:', error);
+                const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
+                showToast(`음성 변환 중 오류가 발생했습니다: ${errorMessage}`, 'error');
+                setSessions(prev => prev.map(s =>
+                  s.id === newSession.id ? { ...s, status: 'error' as const } : s
+                ));
+              } finally {
+                setIsTranscribing(false);
+              }
             }, 500);
           }
 
@@ -1074,11 +1173,40 @@ export default function Home() {
           {/* 선택된 파일 정보 */}
           {selectedSession && (
             <div className="bg-white rounded-lg shadow p-6 mb-6">
+              {/* 변환 진행 상태 표시 */}
+              {(isTranscribing || compressionProgress || selectedSession.status === 'transcribing') && (
+                <div className="mb-4 p-4 bg-blue-50 rounded-lg border-2 border-blue-300">
+                  <div className="flex items-center space-x-3">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                    <div className="flex-1">
+                      <p className="text-blue-800 font-semibold">
+                        {compressionProgress || '음성 변환 중...'}
+                      </p>
+                      <p className="text-blue-600 text-sm mt-1">
+                        잠시만 기다려주세요. 완료되면 자동으로 표시됩니다.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold text-gray-900">{selectedSession.fileName}</h2>
-                <span className="text-sm text-gray-500">
-                  {selectedSession.file ? `${(selectedSession.file.size / 1024 / 1024).toFixed(2)}MB` : '파일 정보 없음'}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-gray-500">
+                    {selectedSession.file ? `${(selectedSession.file.size / 1024 / 1024).toFixed(2)}MB` : '파일 정보 없음'}
+                  </span>
+                  {selectedSession.status === 'transcribing' && (
+                    <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full font-medium animate-pulse">
+                      변환 중...
+                    </span>
+                  )}
+                  {selectedSession.status === 'error' && (
+                    <span className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded-full font-medium">
+                      오류 발생
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* 오디오 플레이어 */}
