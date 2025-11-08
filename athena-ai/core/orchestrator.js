@@ -358,7 +358,7 @@ ${learningContext}
   /**
    * 스트리밍 처리 함수 (모든 협업 모드 지원, 이미지 데이터 포함)
    */
-  async *processStream(userId, sessionId, userMessage, searchResults = null, imageData = []) {
+  async *processStream(userId, sessionId, userMessage, searchResults = null, imageData = [], projectId = null) {
     try {
       // 1. 사용자 메시지 저장
       this.memory.addShortTermMemory(userId, sessionId, 'user', userMessage);
@@ -367,26 +367,29 @@ ${learningContext}
       const strategy = await this.analyzeQuery(userId, sessionId, userMessage);
       
       console.log('🎬 스트리밍 모드:', strategy.collaborationMode);
+      if (projectId) {
+        console.log('📁 프로젝트 컨텍스트 사용:', projectId);
+      }
 
-      // 3. 전략에 따라 스트리밍 실행 (이미지 데이터 전달)
+      // 3. 전략에 따라 스트리밍 실행 (이미지 데이터 및 프로젝트 ID 전달)
       switch (strategy.collaborationMode) {
         case 'single':
-          yield* this.executeSingleStream(userId, sessionId, userMessage, strategy, searchResults, imageData);
+          yield* this.executeSingleStream(userId, sessionId, userMessage, strategy, searchResults, imageData, projectId);
           break;
         case 'parallel':
-          yield* this.executeParallelStream(userId, sessionId, userMessage, strategy, searchResults, imageData);
+          yield* this.executeParallelStream(userId, sessionId, userMessage, strategy, searchResults, imageData, projectId);
           break;
         case 'sequential':
-          yield* this.executeSequentialStream(userId, sessionId, userMessage, strategy, searchResults, imageData);
+          yield* this.executeSequentialStream(userId, sessionId, userMessage, strategy, searchResults, imageData, projectId);
           break;
         case 'debate':
-          yield* this.executeDebateStream(userId, sessionId, userMessage, strategy, searchResults, imageData);
+          yield* this.executeDebateStream(userId, sessionId, userMessage, strategy, searchResults, imageData, projectId);
           break;
         case 'voting':
-          yield* this.executeVotingStream(userId, sessionId, userMessage, strategy, searchResults, imageData);
+          yield* this.executeVotingStream(userId, sessionId, userMessage, strategy, searchResults, imageData, projectId);
           break;
         default:
-          yield* this.executeSingleStream(userId, sessionId, userMessage, strategy, searchResults, imageData);
+          yield* this.executeSingleStream(userId, sessionId, userMessage, strategy, searchResults, imageData, projectId);
       }
 
     } catch (error) {
@@ -397,9 +400,106 @@ ${learningContext}
   }
 
   /**
+   * 프로젝트 컨텍스트 가져오기 (프로젝트 리소스 포함)
+   */
+  getProjectContext(projectId, query = '') {
+    if (!projectId) return '';
+    
+    try {
+      // 프로젝트 컨텍스트 가져오기
+      let contexts;
+      if (query) {
+        contexts = this.memory.db.prepare(`
+          SELECT * FROM project_context 
+          WHERE project_id = ? 
+          AND (title LIKE ? OR content LIKE ?)
+          ORDER BY importance DESC, updated_at DESC
+          LIMIT 50
+        `).all(projectId, `%${query}%`, `%${query}%`);
+      } else {
+        contexts = this.memory.db.prepare(`
+          SELECT * FROM project_context 
+          WHERE project_id = ? 
+          ORDER BY importance DESC, updated_at DESC
+          LIMIT 100
+        `).all(projectId);
+      }
+
+      // 프로젝트 리소스도 가져오기 (컨텍스트에 없는 것들)
+      let resources;
+      if (query) {
+        resources = this.memory.db.prepare(`
+          SELECT * FROM project_resources 
+          WHERE project_id = ? 
+          AND (title LIKE ? OR content LIKE ?)
+          ORDER BY created_at DESC
+          LIMIT 50
+        `).all(projectId, `%${query}%`, `%${query}%`);
+      } else {
+        resources = this.memory.db.prepare(`
+          SELECT * FROM project_resources 
+          WHERE project_id = ? 
+          ORDER BY created_at DESC
+          LIMIT 100
+        `).all(projectId);
+      }
+
+      // 리소스의 내용을 컨텍스트 형식으로 변환
+      const resourceContexts = resources.map((resource) => {
+        const metadata = resource.metadata ? JSON.parse(resource.metadata) : {};
+        let content = resource.content || '';
+        
+        // 메타데이터 정보 추가
+        if (metadata.fileSize) {
+          content = `파일 크기: ${(metadata.fileSize / 1024).toFixed(1)} KB\n${content}`;
+        }
+        if (metadata.fileType) {
+          content = `파일 타입: ${metadata.fileType}\n${content}`;
+        }
+        
+        return {
+          context_type: resource.resource_type,
+          title: resource.title,
+          content: content,
+          importance: resource.resource_type === 'material' ? 7 : 5,
+        };
+      });
+
+      // 컨텍스트와 리소스 합치기
+      const allContexts = [...contexts, ...resourceContexts];
+
+      if (allContexts.length === 0) return '';
+
+      // 중복 제거 (같은 제목과 내용)
+      const uniqueContexts = [];
+      const seen = new Set();
+      for (const ctx of allContexts) {
+        const key = `${ctx.title}_${ctx.content.substring(0, 100)}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueContexts.push(ctx);
+        }
+      }
+
+      const contextText = uniqueContexts.map((ctx, idx) => {
+        const tags = ctx.tags ? (typeof ctx.tags === 'string' ? JSON.parse(ctx.tags) : ctx.tags) : [];
+        const contentPreview = ctx.content && ctx.content.length > 2000 
+          ? ctx.content.substring(0, 2000) + '...' 
+          : ctx.content;
+        return `[${idx + 1}] [${ctx.context_type}] ${ctx.title}\n${contentPreview}${tags.length > 0 ? `\n태그: ${tags.join(', ')}` : ''}`;
+      }).join('\n\n');
+
+      return `\n\n=== ⚠️ 중요: 프로젝트 학습 자료 컨텍스트 (최우선 참고) ===\n현재 선택된 프로젝트의 모든 학습 자료와 내용입니다. 이 프로젝트 컨텍스트를 최우선으로 참고하여 답변하세요:\n\n총 ${uniqueContexts.length}개의 자료:\n\n${contextText}\n\n**답변 규칙:**\n1. 프로젝트 컨텍스트의 내용을 최우선으로 참고하여 답변하세요.\n2. 사용자의 질문과 직접적으로 관련된 프로젝트 자료를 우선적으로 활용하세요.\n3. 프로젝트에 업로드된 모든 파일의 내용을 기반으로 답변하세요.\n4. 프로젝트 컨텍스트에 없는 일반적인 정보는 보조적으로만 사용하세요.\n5. 답변 시 프로젝트 자료의 내용을 직접 인용하고 참고하세요.`;
+    } catch (error) {
+      console.error('Failed to get project context:', error);
+      return '';
+    }
+  }
+
+  /**
    * Single 모드 스트리밍 (이미지 데이터 지원)
    */
-  async *executeSingleStream(userId, sessionId, userMessage, strategy, searchResults = null, imageData = []) {
+  async *executeSingleStream(userId, sessionId, userMessage, strategy, searchResults = null, imageData = [], projectId = null) {
     const agentName = strategy.recommendedAgents[0] || 'ChatGPT';
     const agent = this.providers[agentName];
 
@@ -410,7 +510,16 @@ ${learningContext}
     const context = this.memory.getContextWindow(sessionId, 10);
     const identity = this.memory.getAllIdentity('core');
     
-    let systemPrompt = this.buildAthenaSystemPrompt(identity);
+    let systemPrompt = this.buildAthenaSystemPrompt(identity, projectId);
+    
+    // 프로젝트 컨텍스트 추가 (프로젝트가 선택된 경우 최우선 참고)
+    if (projectId) {
+      const projectContext = this.getProjectContext(projectId, userMessage.substring(0, 100));
+      if (projectContext) {
+        // 프로젝트 컨텍스트를 시스템 프롬프트 앞부분에 추가하여 우선순위 확보
+        systemPrompt = projectContext + '\n\n' + systemPrompt;
+      }
+    }
     
     // 웹 검색 결과가 있으면 시스템 프롬프트에 추가
     if (searchResults && searchResults.length > 0 && this.webSearchService) {
@@ -938,12 +1047,21 @@ ${votes.map(v => `[${v.agent}]\n${v.response}`).join('\n\n')}
   /**
    * Parallel 모드 스트리밍
    */
-  async *executeParallelStream(userId, sessionId, userMessage, strategy, searchResults = null) {
+  async *executeParallelStream(userId, sessionId, userMessage, strategy, searchResults = null, imageData = [], projectId = null) {
     const agents = strategy.recommendedAgents;
     const context = this.memory.getContextWindow(sessionId, 10);
     const identity = this.memory.getAllIdentity('core');
     
-    let systemPrompt = this.buildAthenaSystemPrompt(identity);
+    let systemPrompt = this.buildAthenaSystemPrompt(identity, projectId);
+    
+    // 프로젝트 컨텍스트 추가 (프로젝트가 선택된 경우 최우선 참고)
+    if (projectId) {
+      const projectContext = this.getProjectContext(projectId, userMessage.substring(0, 100));
+      if (projectContext) {
+        // 프로젝트 컨텍스트를 시스템 프롬프트 앞부분에 추가하여 우선순위 확보
+        systemPrompt = projectContext + '\n\n' + systemPrompt;
+      }
+    }
     
     if (searchResults && searchResults.length > 0 && this.webSearchService) {
       const searchContextWithNumbers = searchResults.map((result, index) => {
@@ -1055,9 +1173,21 @@ ${results.map((r, i) => `[${r.agent}의 답변]\n${r.content}\n`).join('\n')}
   /**
    * Sequential 모드 스트리밍
    */
-  async *executeSequentialStream(userId, sessionId, userMessage, strategy, searchResults = null) {
+  async *executeSequentialStream(userId, sessionId, userMessage, strategy, searchResults = null, imageData = [], projectId = null) {
     const agents = strategy.recommendedAgents;
     const context = this.memory.getContextWindow(sessionId, 10);
+    const identity = this.memory.getAllIdentity('core');
+    let baseSystemPrompt = this.buildAthenaSystemPrompt(identity, projectId);
+    
+    // 프로젝트 컨텍스트 추가 (프로젝트가 선택된 경우 최우선 참고)
+    if (projectId) {
+      const projectContext = this.getProjectContext(projectId, userMessage.substring(0, 100));
+      if (projectContext) {
+        // 프로젝트 컨텍스트를 시스템 프롬프트 앞부분에 추가하여 우선순위 확보
+        baseSystemPrompt = projectContext + '\n\n' + baseSystemPrompt;
+      }
+    }
+    
     let currentResult = userMessage;
     const steps = [];
 
@@ -1081,6 +1211,7 @@ ${results.map((r, i) => `[${r.agent}의 답변]\n${r.content}\n`).join('\n')}
 
       const stepPrompt = `이전 단계의 결과를 바탕으로 다음 작업을 수행하세요.\n\n${currentResult}`;
       const stream = await agent.streamChat([
+        { role: 'system', content: baseSystemPrompt },
         ...context,
         { role: 'user', content: stepPrompt }
       ]);
@@ -1128,13 +1259,22 @@ ${results.map((r, i) => `[${r.agent}의 답변]\n${r.content}\n`).join('\n')}
   /**
    * Debate 모드 스트리밍
    */
-  async *executeDebateStream(userId, sessionId, userMessage, strategy, searchResults = null) {
+  async *executeDebateStream(userId, sessionId, userMessage, strategy, searchResults = null, imageData = [], projectId = null) {
     const agents = strategy.recommendedAgents.slice(0, 3);
     const rounds = 2;
     const debates = [];
     const identity = this.memory.getAllIdentity('core');
     
-    let baseSystemPrompt = this.buildAthenaSystemPrompt(identity);
+    let baseSystemPrompt = this.buildAthenaSystemPrompt(identity, projectId);
+    
+    // 프로젝트 컨텍스트 추가 (프로젝트가 선택된 경우 최우선 참고)
+    if (projectId) {
+      const projectContext = this.getProjectContext(projectId, userMessage.substring(0, 100));
+      if (projectContext) {
+        // 프로젝트 컨텍스트를 시스템 프롬프트 앞부분에 추가하여 우선순위 확보
+        baseSystemPrompt = projectContext + '\n\n' + baseSystemPrompt;
+      }
+    }
     
     if (searchResults && searchResults.length > 0 && this.webSearchService) {
       const searchContext = this.webSearchService.formatResultsForAI(searchResults);
@@ -1257,12 +1397,21 @@ ${debates.map((round, i) =>
   /**
    * Voting 모드 스트리밍
    */
-  async *executeVotingStream(userId, sessionId, userMessage, strategy, searchResults = null) {
+  async *executeVotingStream(userId, sessionId, userMessage, strategy, searchResults = null, imageData = [], projectId = null) {
     const agents = strategy.recommendedAgents;
     const votes = [];
     const identity = this.memory.getAllIdentity('core');
     
-    let baseSystemPrompt = this.buildAthenaSystemPrompt(identity);
+    let baseSystemPrompt = this.buildAthenaSystemPrompt(identity, projectId);
+    
+    // 프로젝트 컨텍스트 추가 (프로젝트가 선택된 경우 최우선 참고)
+    if (projectId) {
+      const projectContext = this.getProjectContext(projectId, userMessage.substring(0, 100));
+      if (projectContext) {
+        // 프로젝트 컨텍스트를 시스템 프롬프트 앞부분에 추가하여 우선순위 확보
+        baseSystemPrompt = projectContext + '\n\n' + baseSystemPrompt;
+      }
+    }
     
     if (searchResults && searchResults.length > 0 && this.webSearchService) {
       const searchContext = this.webSearchService.formatResultsForAI(searchResults);
@@ -1381,7 +1530,7 @@ ${votes.map(v => `[${v.agent}]\n${v.response}`).join('\n\n')}
     });
   }
 
-  buildAthenaSystemPrompt(identity) {
+  buildAthenaSystemPrompt(identity, projectId = null) {
     let prompt = `당신은 Athena입니다. 사용자의 AI 친구이자 비서입니다.
 
 당신의 특성:
@@ -1397,6 +1546,11 @@ ${identity.map(i => `- ${i.key}: ${JSON.stringify(i.value)}`).join('\n')}
 - 필요시 명확히 질문하여 확인
 - 출처가 있는 정보는 항상 출처 표시
 - 불확실한 내용은 솔직하게 인정`;
+
+    // 프로젝트가 선택되지 않았을 때 일반 AI 답변 모드임을 명시
+    if (!projectId) {
+      prompt += `\n\n=== 현재 모드: 일반 AI 답변 모드 ===\n현재 특정 프로젝트가 선택되지 않았으므로, 일반적인 AI 지식과 정보를 바탕으로 답변하세요.`;
+    }
 
     // MCP 도구 정보 추가
     if (this.mcpManager && this.mcpManager.enabled) {

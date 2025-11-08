@@ -9,6 +9,29 @@ const nextConfig: NextConfig = {
       fs: false,
     };
     
+    // athena-ai 디렉토리를 모듈로 인식하도록 설정
+    if (isServer) {
+      const path = require('path');
+      
+      // athena-ai를 절대 경로로 매핑
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        'athena-ai': path.resolve(__dirname, 'athena-ai'),
+      };
+      
+      // 서버 사이드에서만 athena-ai 디렉토리 포함
+      config.resolve.modules = [
+        ...(config.resolve.modules || []),
+        path.resolve(__dirname),
+      ];
+      
+      // .js 확장자로 import 허용
+      config.resolve.extensions = [
+        ...(config.resolve.extensions || []),
+        '.js',
+      ];
+    }
+    
     // 서버 사이드에서만 네이티브 모듈 사용
     if (isServer) {
       config.externals = config.externals || [];

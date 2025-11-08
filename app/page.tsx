@@ -4,6 +4,8 @@ import { useState, useRef, useEffect } from 'react';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import type { MemoSession } from './types';
+import AthenaCopilot from './components/AthenaCopilot';
+import ProjectManager from './components/ProjectManager';
 
 interface FileSession {
   id: string;
@@ -14,6 +16,7 @@ interface FileSession {
   chunks: { id: string; name: string; transcription: string }[];
   status: 'pending' | 'transcribing' | 'completed' | 'error';
   createdAt: Date;
+  projectId?: string; // 프로젝트 ID 추가
 }
 
 interface Toast {
@@ -50,6 +53,20 @@ export default function Home() {
   const [memoPanelOpen, setMemoPanelOpen] = useState(true); // 기본적으로 메모장 열림
   const memoTextareaRef = useRef<HTMLTextAreaElement>(null);
   
+  // 프로젝트 관련 상태
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [userId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      let stored = localStorage.getItem('athena-user-id');
+      if (!stored) {
+        stored = `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        localStorage.setItem('athena-user-id', stored);
+      }
+      return stored;
+    }
+    return `user-${Date.now()}`;
+  });
+  
   // Hydration 오류 방지: 클라이언트 마운트 여부 추적
   const [isMounted, setIsMounted] = useState(false);
   
@@ -71,9 +88,14 @@ export default function Home() {
 
   const selectedSession = sessions.find(s => s.id === selectedSessionId);
 
-  // 검색 및 정렬된 세션 목록 (파일)
+  // 검색 및 정렬된 세션 목록 (파일) - 프로젝트 필터링 포함
   const filteredAndSortedSessions = sessions
     .filter(session => {
+      // 프로젝트 필터링
+      if (selectedProjectId) {
+        if (session.projectId !== selectedProjectId) return false;
+      }
+      // 검색 필터링
       if (!searchQuery) return true;
       const query = searchQuery.toLowerCase();
       return session.fileName.toLowerCase().includes(query) ||
@@ -90,9 +112,42 @@ export default function Home() {
       return sortOrder === 'asc' ? comparison : -comparison;
     });
 
-  // 검색 및 정렬된 메모 목록
+  // 프로젝트별 자료 추가 함수
+  const addToProject = async (resourceType: 'file' | 'memo' | 'material', resourceId: string, title: string, content?: string) => {
+    if (!selectedProjectId) {
+      showToast('프로젝트를 먼저 선택해주세요.', 'error');
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/projects/${selectedProjectId}/resources`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          resourceType,
+          resourceId,
+          title,
+          content: content || '',
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        showToast('프로젝트에 추가되었습니다.', 'success');
+      } else {
+        showToast(data.error || '추가 실패', 'error');
+      }
+    } catch (error) {
+      console.error('Failed to add to project:', error);
+      showToast('프로젝트 추가 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  // 검색 및 정렬된 메모 목록 - 프로젝트 필터링 포함
   const filteredAndSortedMemos = memoSessions
     .filter(memo => {
+      // 프로젝트 필터링 (메모도 프로젝트 ID를 가질 수 있음)
+      // 일단 모든 메모 표시, 나중에 프로젝트 ID 추가 가능
       if (!searchQuery) return true;
       const query = searchQuery.toLowerCase();
       return memo.title.toLowerCase().includes(query) ||
@@ -153,7 +208,7 @@ export default function Home() {
 
   // 토스트 알림 표시
   const showToast = (message: string, type: 'success' | 'info' | 'error' = 'info') => {
-    const id = Date.now();
+    const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     setToasts(prev => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
@@ -237,108 +292,188 @@ export default function Home() {
     }
   }, [isRecording, isPaused]);
 
-  // localStorage에서 세션 복원
+  // DB와 localStorage에서 세션 복원
   useEffect(() => {
-    try {
-    const savedSessions = localStorage.getItem('meeting-sessions');
-    if (savedSessions) {
+    const loadSessions = async () => {
       try {
-        const parsed = JSON.parse(savedSessions);
-          // 배열인지 확인
-          if (Array.isArray(parsed) && parsed.length > 0) {
-        // File 객체는 저장할 수 없으므로, 기본 정보만 복원
-        const restoredSessions = parsed.map((s: FileSession) => ({
-          ...s,
-          file: null, // File 객체는 복원 불가
-              createdAt: s.createdAt ? new Date(s.createdAt) : new Date(),
-          // 변환 중 상태였다면 대기 상태로 리셋 (페이지 새로고침 후 멈춰있는 파일 방지)
-              status: s.status === 'transcribing' ? 'pending' : (s.status || 'pending'),
-              transcription: s.transcription || '',
-              minutes: s.minutes || '',
-              chunks: s.chunks || [],
-        }));
-        setSessions(restoredSessions);
-            console.log(`세션 ${restoredSessions.length}개 복원 완료`);
-          }
-      } catch (error) {
-          console.error('세션 데이터 파싱 실패:', error);
-          // 손상된 데이터는 삭제
-          localStorage.removeItem('meeting-sessions');
-      }
-      }
-    } catch (error) {
-      console.error('localStorage 접근 실패:', error);
-    }
-  }, []);
+        // 먼저 DB에서 로드 시도
+        const response = await fetch(`/api/sessions?userId=${userId}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success) {
+            // 파일 세션 복원
+            if (data.fileSessions && data.fileSessions.length > 0) {
+              const restoredSessions = data.fileSessions.map((s: any) => ({
+                id: s.id,
+                fileName: s.file_name,
+                file: null, // File 객체는 복원 불가
+                transcription: s.transcription || '',
+                minutes: s.minutes || '',
+                chunks: s.chunks || [],
+                status: (s.status === 'transcribing' ? 'pending' : s.status) || 'pending',
+                createdAt: s.createdAt,
+                projectId: s.project_id || undefined,
+              }));
+              setSessions(restoredSessions);
+              console.log(`DB에서 세션 ${restoredSessions.length}개 복원 완료`);
+            }
 
-  // 세션이 변경될 때마다 localStorage에 저장
-  useEffect(() => {
-    try {
-      // File 객체를 제외하고 저장
-      const sessionsToSave = sessions.map(s => ({
-        id: s.id,
-        fileName: s.fileName,
-        file: s.file ? {
-          name: s.file.name,
-          size: s.file.size,
-          type: s.file.type,
-        } : null,
-        transcription: s.transcription || '',
-        minutes: s.minutes || '',
-        chunks: s.chunks || [],
-        status: s.status,
-        createdAt: s.createdAt,
-      }));
-      
-      // 빈 배열도 저장 (명시적으로 초기화)
-      localStorage.setItem('meeting-sessions', JSON.stringify(sessionsToSave));
-    } catch (error) {
-      console.error('localStorage 저장 실패:', error);
-      // 저장 실패해도 앱은 계속 작동
-    }
-  }, [sessions]);
-
-  // 메모 세션 localStorage에서 복원
-  useEffect(() => {
-    try {
-      const savedMemos = localStorage.getItem('meeting-memos');
-      if (savedMemos) {
-        try {
-          const parsed = JSON.parse(savedMemos);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const restoredMemos = parsed.map((m: MemoSession) => ({
-              ...m,
-              createdAt: m.createdAt ? new Date(m.createdAt) : new Date(),
-              updatedAt: m.updatedAt ? new Date(m.updatedAt) : new Date(),
-            }));
-            setMemoSessions(restoredMemos);
+            // 메모 세션 복원
+            if (data.memoSessions && data.memoSessions.length > 0) {
+              const restoredMemos = data.memoSessions.map((m: any) => ({
+                id: m.id,
+                title: m.title,
+                content: m.content,
+                createdAt: m.createdAt,
+                updatedAt: m.updatedAt,
+                type: 'memo' as const,
+              }));
+              setMemoSessions(restoredMemos);
+              console.log(`DB에서 메모 ${restoredMemos.length}개 복원 완료`);
+            }
+            return; // DB에서 성공적으로 로드했으면 localStorage는 스킵
           }
-        } catch (error) {
-          console.error('메모 데이터 파싱 실패:', error);
-          localStorage.removeItem('meeting-memos');
         }
+      } catch (error) {
+        console.error('DB에서 세션 로드 실패:', error);
       }
-    } catch (error) {
-      console.error('localStorage 접근 실패:', error);
-    }
-  }, []);
 
-  // 메모 세션이 변경될 때마다 localStorage에 저장
-  useEffect(() => {
-    try {
-      const memosToSave = memoSessions.map(m => ({
-        id: m.id,
-        title: m.title,
-        content: m.content,
-        createdAt: m.createdAt,
-        updatedAt: m.updatedAt,
-        type: m.type,
-      }));
-      localStorage.setItem('meeting-memos', JSON.stringify(memosToSave));
-    } catch (error) {
-      console.error('메모 localStorage 저장 실패:', error);
+      // DB 로드 실패 시 localStorage에서 복원 (하위 호환성)
+      try {
+        const savedSessions = localStorage.getItem('meeting-sessions');
+        if (savedSessions) {
+          try {
+            const parsed = JSON.parse(savedSessions);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              const restoredSessions = parsed.map((s: FileSession) => ({
+                ...s,
+                file: null,
+                createdAt: s.createdAt ? new Date(s.createdAt) : new Date(),
+                status: s.status === 'transcribing' ? 'pending' : (s.status || 'pending'),
+                transcription: s.transcription || '',
+                minutes: s.minutes || '',
+                chunks: s.chunks || [],
+              }));
+              setSessions(restoredSessions);
+              console.log(`localStorage에서 세션 ${restoredSessions.length}개 복원 완료`);
+            }
+          } catch (error) {
+            console.error('세션 데이터 파싱 실패:', error);
+            localStorage.removeItem('meeting-sessions');
+          }
+        }
+      } catch (error) {
+        console.error('localStorage 접근 실패:', error);
+      }
+    };
+
+    if (userId) {
+      loadSessions();
     }
-  }, [memoSessions]);
+  }, [userId]);
+
+  // 세션이 변경될 때마다 DB와 localStorage에 저장
+  useEffect(() => {
+    if (!userId || sessions.length === 0) return;
+
+    const saveSessions = async () => {
+      try {
+        // DB에 저장
+        for (const session of sessions) {
+          const fileMetadata = session.file ? {
+            name: session.file.name,
+            size: session.file.size,
+            type: session.file.type,
+          } : null;
+
+          await fetch('/api/sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId,
+              type: 'file',
+              data: {
+                id: session.id,
+                fileName: session.fileName,
+                transcription: session.transcription || '',
+                minutes: session.minutes || '',
+                chunks: session.chunks || [],
+                status: session.status,
+                projectId: session.projectId || null,
+                fileMetadata,
+              }
+            }),
+          });
+        }
+
+        // localStorage에도 저장 (하위 호환성)
+        const sessionsToSave = sessions.map(s => ({
+          id: s.id,
+          fileName: s.fileName,
+          file: s.file ? {
+            name: s.file.name,
+            size: s.file.size,
+            type: s.file.type,
+          } : null,
+          transcription: s.transcription || '',
+          minutes: s.minutes || '',
+          chunks: s.chunks || [],
+          status: s.status,
+          createdAt: s.createdAt,
+        }));
+        localStorage.setItem('meeting-sessions', JSON.stringify(sessionsToSave));
+      } catch (error) {
+        console.error('세션 저장 실패:', error);
+        // 저장 실패해도 앱은 계속 작동
+      }
+    };
+
+    saveSessions();
+  }, [sessions, userId]);
+
+  // 메모 세션은 위의 loadSessions에서 함께 로드됨 (중복 제거)
+
+  // 메모 세션이 변경될 때마다 DB와 localStorage에 저장
+  useEffect(() => {
+    if (!userId || memoSessions.length === 0) return;
+
+    const saveMemos = async () => {
+      try {
+        // DB에 저장
+        for (const memo of memoSessions) {
+          await fetch('/api/sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId,
+              type: 'memo',
+              data: {
+                id: memo.id,
+                title: memo.title,
+                content: memo.content,
+                projectId: null, // 메모는 프로젝트 ID를 가질 수 있지만 현재는 null
+              }
+            }),
+          });
+        }
+
+        // localStorage에도 저장 (하위 호환성)
+        const memosToSave = memoSessions.map(m => ({
+          id: m.id,
+          title: m.title,
+          content: m.content,
+          createdAt: m.createdAt,
+          updatedAt: m.updatedAt,
+          type: m.type,
+        }));
+        localStorage.setItem('meeting-memos', JSON.stringify(memosToSave));
+      } catch (error) {
+        console.error('메모 저장 실패:', error);
+      }
+    };
+
+    saveMemos();
+  }, [memoSessions, userId]);
 
   // 선택된 메모 로드
   useEffect(() => {
@@ -455,8 +590,8 @@ export default function Home() {
       const files = Array.from(e.target.files);
 
       // 각 파일에 대해 세션 생성
-      const newSessions: FileSession[] = files.map(file => ({
-        id: `${Date.now()}-${Math.random()}`,
+      const newSessions: FileSession[] = files.map((file, index) => ({
+        id: `session-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`,
         fileName: file.name,
         file: file,
         transcription: '',
@@ -464,6 +599,7 @@ export default function Home() {
         chunks: [],
         status: 'pending' as const,
         createdAt: new Date(),
+        projectId: selectedProjectId || undefined,
       }));
 
       setSessions(prev => [...prev, ...newSessions]);
@@ -471,6 +607,13 @@ export default function Home() {
       // 첫 번째 파일을 자동 선택
       if (newSessions.length > 0) {
         setSelectedSessionId(newSessions[0].id);
+      }
+
+      // 프로젝트가 선택되어 있으면 프로젝트에 추가
+      if (selectedProjectId) {
+        for (const session of newSessions) {
+          await addToProject('file', session.id, session.fileName);
+        }
       }
 
       e.target.value = ''; // 같은 파일 재선택 가능하도록
@@ -628,6 +771,24 @@ export default function Home() {
             ? { ...s, transcription: fullTranscription.trim(), chunks: chunkSessions, status: 'completed' as const }
             : s
         ));
+        
+        // 프로젝트 컨텍스트에 변환 텍스트 추가
+        if (selectedProjectId && fullTranscription.trim()) {
+          const session = sessions.find(s => s.id === sessionId);
+          if (session) {
+            await fetch(`/api/projects/${selectedProjectId}/context`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contextType: 'file_content',
+                title: `${session.fileName} - 변환 텍스트`,
+                content: fullTranscription.trim(),
+                sourceResourceId: sessionId,
+                importance: 7,
+              }),
+            });
+          }
+        }
       } else {
         // 일반 변환
         setCompressionProgress('음성 파일 변환 중...');
@@ -640,6 +801,24 @@ export default function Home() {
             ? { ...s, transcription: text, status: 'completed' as const }
             : s
         ));
+        
+        // 프로젝트 컨텍스트에 변환 텍스트 추가
+        if (selectedProjectId && text) {
+          const session = sessions.find(s => s.id === sessionId);
+          if (session) {
+            await fetch(`/api/projects/${selectedProjectId}/context`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contextType: 'file_content',
+                title: `${session.fileName} - 변환 텍스트`,
+                content: text,
+                sourceResourceId: sessionId,
+                importance: 7,
+              }),
+            });
+          }
+        }
       }
     } catch (error) {
       console.error('Transcribe error:', error);
@@ -764,6 +943,25 @@ export default function Home() {
             ? { ...s, minutes: data.minutes }
             : s
         ));
+        
+        // 프로젝트 컨텍스트에 회의록 추가
+        if (selectedProjectId && data.minutes) {
+          const session = sessions.find(s => s.id === selectedSessionId);
+          if (session) {
+            await fetch(`/api/projects/${selectedProjectId}/context`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contextType: 'summary',
+                title: `${session.fileName} - 회의록`,
+                content: data.minutes,
+                sourceResourceId: selectedSessionId,
+                importance: 8,
+              }),
+            });
+          }
+        }
+        
         showToast('회의록 생성이 완료되었습니다!', 'success');
       }
     } catch (error) {
@@ -796,13 +994,22 @@ export default function Home() {
     showToast('파일이 다운로드되었습니다.', 'success');
   };
 
-  const handleDeleteSession = (sessionId: string) => {
+  const handleDeleteSession = async (sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId);
 
     // 실제 변환 작업 중일 때만 삭제 불가 (멈춰있는 상태는 삭제 가능)
     if (session?.status === 'transcribing' && isTranscribing) {
       showToast('변환 작업 중인 파일은 삭제할 수 없습니다.', 'error');
       return;
+    }
+
+    try {
+      // DB에서도 삭제
+      await fetch(`/api/sessions?sessionId=${sessionId}&type=file`, {
+        method: 'DELETE',
+      });
+    } catch (error) {
+      console.error('세션 삭제 실패:', error);
     }
 
     setSessions(prev => prev.filter(s => s.id !== sessionId));
@@ -830,9 +1037,9 @@ export default function Home() {
   };
 
   // 메모 생성
-  const createMemo = () => {
+  const createMemo = async () => {
     const newMemo: MemoSession = {
-      id: `memo-${Date.now()}`,
+      id: `memo-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       title: memoTitle || `메모 ${memoSessions.length + 1}`,
       content: '',
       createdAt: new Date(),
@@ -844,26 +1051,62 @@ export default function Home() {
     setMemoTitle(newMemo.title);
     setMemoContent('');
     setMemoPanelOpen(true);
+    
+    // 프로젝트가 선택되어 있으면 프로젝트에 추가
+    if (selectedProjectId) {
+      await addToProject('memo', newMemo.id, newMemo.title);
+    }
+    
     showToast('새 메모가 생성되었습니다.', 'success');
   };
 
   // 메모 저장
-  const saveMemo = () => {
+  const saveMemo = async () => {
     if (!selectedMemoId) {
       createMemo();
       return;
     }
 
+    const updatedMemo = {
+      content: memoContent,
+      title: memoTitle || memoSessions.find(m => m.id === selectedMemoId)?.title || '메모',
+    };
+
     setMemoSessions(prev => prev.map(memo => 
       memo.id === selectedMemoId 
-        ? { ...memo, content: memoContent, title: memoTitle || memo.title, updatedAt: new Date() }
+        ? { ...memo, ...updatedMemo, updatedAt: new Date() }
         : memo
     ));
+    
+    // 프로젝트 컨텍스트에 메모 내용 추가/업데이트
+    if (selectedProjectId && memoContent) {
+      await fetch(`/api/projects/${selectedProjectId}/context`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contextType: 'memo',
+          title: updatedMemo.title,
+          content: memoContent,
+          sourceResourceId: selectedMemoId,
+          importance: 6,
+        }),
+      });
+    }
+    
     showToast('메모가 저장되었습니다.', 'success');
   };
 
   // 메모 삭제
-  const deleteMemo = (memoId: string) => {
+  const deleteMemo = async (memoId: string) => {
+    try {
+      // DB에서도 삭제
+      await fetch(`/api/sessions?sessionId=${memoId}&type=memo`, {
+        method: 'DELETE',
+      });
+    } catch (error) {
+      console.error('메모 삭제 실패:', error);
+    }
+    
     setMemoSessions(prev => prev.filter(m => m.id !== memoId));
     if (selectedMemoId === memoId) {
       setSelectedMemoId(null);
@@ -1031,17 +1274,23 @@ export default function Home() {
           URL.revokeObjectURL(url);
           showToast('녹음 파일이 다운로드되었습니다!', 'success');
 
-          // 세션에 추가
-          const newSession: FileSession = {
-            id: `${Date.now()}-${Math.random()}`,
-            fileName: fileName,
-            file: audioFile,
-            transcription: '',
-            minutes: '',
-            chunks: [],
-            status: 'pending',
-            createdAt: new Date(),
-          };
+      // 세션에 추가
+      const newSession: FileSession = {
+        id: `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        fileName: fileName,
+        file: audioFile,
+        transcription: '',
+        minutes: '',
+        chunks: [],
+        status: 'pending',
+        createdAt: new Date(),
+        projectId: selectedProjectId || undefined,
+      };
+      
+      // 프로젝트가 선택되어 있으면 프로젝트에 추가
+      if (selectedProjectId) {
+        await addToProject('file', newSession.id, fileName);
+      }
 
           setSessions(prev => [...prev, newSession]);
           setSelectedSessionId(newSession.id);
@@ -1339,7 +1588,19 @@ export default function Home() {
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* 프로젝트 관리 */}
+          {isMounted && (
+            <div className="mb-4 pb-4 border-b">
+              <ProjectManager
+                userId={userId}
+                selectedProjectId={selectedProjectId}
+                onSelectProject={setSelectedProjectId}
+                showToast={showToast}
+              />
+            </div>
+          )}
+
           {/* 파일 세션 목록 */}
           {filteredAndSortedSessions.length > 0 && (
             <div className="mb-4">
@@ -1412,6 +1673,22 @@ export default function Home() {
                       ⟳
                     </button>
                   )}
+                  {selectedProjectId && session.projectId !== selectedProjectId && (
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await addToProject('file', session.id, session.fileName, session.transcription);
+                        // 세션의 projectId 업데이트
+                        setSessions(prev => prev.map(s =>
+                          s.id === session.id ? { ...s, projectId: selectedProjectId } : s
+                        ));
+                      }}
+                      className="text-green-600 hover:text-green-800 text-sm leading-none"
+                      title="프로젝트에 추가"
+                    >
+                      +
+                    </button>
+                  )}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1432,7 +1709,9 @@ export default function Home() {
           {/* 메모 세션 목록 */}
           {filteredAndSortedMemos.length > 0 && (
             <div className="mt-4">
-              <h3 className="text-xs font-semibold text-gray-600 mb-2">📝 메모</h3>
+              <h3 className="text-xs font-semibold text-gray-600 mb-2">
+                📝 메모 {selectedProjectId && '(프로젝트)'}
+              </h3>
               {filteredAndSortedMemos.map((memo) => (
                 <div
                   key={memo.id}
@@ -1461,16 +1740,30 @@ export default function Home() {
                         {memo.updatedAt.toLocaleDateString('ko-KR')}
                       </p>
                     </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteMemo(memo.id);
-                      }}
-                      className="text-gray-400 hover:text-red-600 text-lg leading-none"
-                      title="삭제"
-                    >
-                      ×
-                    </button>
+                    <div className="flex gap-1">
+                      {selectedProjectId && (
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            await addToProject('memo', memo.id, memo.title, memo.content);
+                          }}
+                          className="text-green-600 hover:text-green-800 text-sm leading-none"
+                          title="프로젝트에 추가"
+                        >
+                          +
+                        </button>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteMemo(memo.id);
+                        }}
+                        className="text-gray-400 hover:text-red-600 text-lg leading-none"
+                        title="삭제"
+                      >
+                        ×
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1508,11 +1801,38 @@ export default function Home() {
       </button>
       )}
 
-      {/* 메인 콘텐츠 영역 - 메모장이 기본 */}
+      {/* 메인 콘텐츠 영역 - 코파일럿이 기본 */}
       {isMounted && (
         <div className="flex-1 flex overflow-hidden">
-          {/* 메모 패널 - 기본적으로 열려있고 메인 영역 차지 */}
-          <div className={`${memoPanelOpen ? 'flex-1' : 'w-0'} transition-all duration-300 bg-white shadow-lg overflow-hidden flex flex-col`}>
+          {/* Athena AI 코파일럿 패널 - 메인 영역 차지 */}
+          <AthenaCopilot
+            sessions={sessions}
+            selectedSessionId={selectedSessionId}
+            selectedProjectId={selectedProjectId}
+            onTranscribe={async (sessionId: string) => {
+              const session = sessions.find(s => s.id === sessionId);
+              if (session) {
+                setSelectedSessionId(sessionId);
+                await transcribeSingleSession(sessionId);
+              }
+            }}
+            onSummarize={async (sessionId: string) => {
+              const session = sessions.find(s => s.id === sessionId);
+              if (session) {
+                setSelectedSessionId(sessionId);
+                if (session.transcription) {
+                  await handleSummarize();
+                }
+              }
+            }}
+            onDeleteSession={handleDeleteSession}
+            onSelectSession={setSelectedSessionId}
+            onCreateMemo={createMemo}
+            showToast={showToast}
+          />
+
+          {/* 메모 패널 - 우측에 고정 */}
+          <div className={`${memoPanelOpen ? 'w-96' : 'w-0'} transition-all duration-300 bg-white border-l border-gray-200 shadow-lg overflow-hidden flex flex-col flex-shrink-0`}>
           <div className="p-4 border-b flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-900">📝 메모장</h2>
             <div className="flex gap-2">
@@ -1609,7 +1929,19 @@ export default function Home() {
 
           {/* 파일 정보 패널 (선택 시에만 오른쪽에 표시) */}
           {selectedSession && (
-            <div className="w-96 bg-white border-l border-gray-200 shadow-lg overflow-y-auto p-6">
+            <div className="flex-1 flex flex-col bg-white border-l border-gray-200">
+              {/* 파일 정보 패널 헤더 */}
+              <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-900">파일 정보</h2>
+                <button
+                  onClick={() => setSelectedSessionId(null)}
+                  className="text-gray-400 hover:text-gray-600 text-xl leading-none px-2 py-1"
+                  title="닫기"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-6">
               {/* 변환 진행 상태 표시 */}
               {(isTranscribing || compressionProgress || selectedSession.status === 'transcribing') && (
                 <div className="mb-4 p-4 bg-blue-50 rounded-lg border-2 border-blue-300">
@@ -1730,8 +2062,10 @@ export default function Home() {
                   </div>
                 </div>
               )}
+              </div>
             </div>
           )}
+
         </div>
       )}
       </div>

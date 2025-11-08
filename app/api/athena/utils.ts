@@ -1,7 +1,10 @@
 import path from 'path';
-import { AthenaOrchestrator } from '../../../../athena-ai/core/orchestrator.js';
-import { WebSearchService } from '../../../../athena-ai/utils/webSearch.js';
-import { initializeDatabase } from '../../../../athena-ai/database/schema.js';
+// @ts-ignore - athena-ai는 webpack alias로 매핑됨
+import { AthenaOrchestrator } from 'athena-ai/core/orchestrator.js';
+// @ts-ignore
+import { WebSearchService } from 'athena-ai/utils/webSearch.js';
+// @ts-ignore
+import { initializeDatabase } from 'athena-ai/database/schema.js';
 
 const dbPath = process.env.ATHENA_DB_PATH || path.join(process.cwd(), 'athena-data', 'athena.db');
 

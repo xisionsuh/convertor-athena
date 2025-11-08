@@ -192,6 +192,85 @@ export function initializeDatabase(dbPath = './data/athena.db') {
     )
   `);
 
+  // 프로젝트 테이블
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  // 프로젝트 자료 테이블 (파일, 메모, 자료 등)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS project_resources (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      resource_type TEXT NOT NULL, -- 'file', 'memo', 'material', 'transcription', 'minutes'
+      resource_id TEXT NOT NULL, -- 원본 파일/메모 ID
+      title TEXT NOT NULL,
+      content TEXT,
+      metadata TEXT, -- JSON 형태로 추가 정보 저장
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    )
+  `);
+
+  // 프로젝트 컨텍스트 테이블 (프로젝트별 학습 컨텍스트)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS project_context (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id TEXT NOT NULL,
+      context_type TEXT NOT NULL, -- 'file_content', 'memo', 'material', 'summary', 'note'
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      source_resource_id TEXT, -- 원본 자료 ID
+      embedding TEXT, -- 벡터 임베딩 (향후 검색용)
+      tags TEXT, -- JSON array
+      importance INTEGER DEFAULT 5, -- 1-10 scale
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    )
+  `);
+
+  // 파일 세션 테이블 (브라우저 독립적 저장)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS file_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      transcription TEXT,
+      minutes TEXT,
+      chunks TEXT, -- JSON 형태로 저장
+      status TEXT NOT NULL DEFAULT 'pending',
+      project_id TEXT,
+      file_metadata TEXT, -- JSON 형태로 파일 정보 저장
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  // 메모 세션 테이블 (브라우저 독립적 저장)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memo_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      project_id TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
   // 인덱스 생성
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_short_term_session ON short_term_memory(session_id);
@@ -208,4 +287,27 @@ export function initializeDatabase(dbPath = './data/athena.db') {
     CREATE INDEX IF NOT EXISTS idx_search_summary_query ON search_summary_cache(query);
     CREATE INDEX IF NOT EXISTS idx_debate_feedback_session ON debate_feedback(session_id);
     CREATE INDEX IF NOT EXISTS idx_voting_feedback_session ON voting_feedback(session_id);
+    CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id);
+    CREATE INDEX IF NOT EXISTS idx_project_resources_project ON project_resources(project_id);
+    CREATE INDEX IF NOT EXISTS idx_project_resources_type ON project_resources(resource_type);
+    CREATE INDEX IF NOT EXISTS idx_project_context_project ON project_context(project_id);
+    CREATE INDEX IF NOT EXISTS idx_project_context_type ON project_context(context_type);
+    CREATE INDEX IF NOT EXISTS idx_file_sessions_user ON file_sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_file_sessions_project ON file_sessions(project_id);
+    CREATE INDEX IF NOT EXISTS idx_memo_sessions_user ON memo_sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_memo_sessions_project ON memo_sessions(project_id);
   `);
+
+  return db;
+}
+
+// 싱글톤 데이터베이스 인스턴스
+let dbInstance = null;
+
+export function getDatabase(dbPath = './data/athena.db') {
+  if (!dbInstance) {
+    dbInstance = new Database(dbPath);
+    dbInstance.pragma('journal_mode = WAL');
+  }
+  return dbInstance;
+}

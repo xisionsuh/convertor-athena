@@ -49,4 +49,38 @@ export interface MemoSession {
   type: 'memo';
 }
 
+export interface Project {
+  id: string;
+  userId: string;
+  name: string;
+  description?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ProjectResource {
+  id: string;
+  projectId: string;
+  resourceType: 'file' | 'memo' | 'material' | 'transcription' | 'minutes';
+  resourceId: string;
+  title: string;
+  content?: string;
+  metadata?: any;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ProjectContext {
+  id: number;
+  projectId: string;
+  contextType: 'file_content' | 'memo' | 'material' | 'summary' | 'note';
+  title: string;
+  content: string;
+  sourceResourceId?: string;
+  tags?: string[];
+  importance: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export type SessionItem = FileSession | MemoSession;
