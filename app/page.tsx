@@ -1234,12 +1234,14 @@ export default function Home() {
             </div>
           )}
           
-          <p className="text-xs text-gray-500">
-            {filteredAndSortedSessions.length}개 파일
-            {filteredAndSortedMemos.length > 0 && ` · ${filteredAndSortedMemos.length}개 메모`}
-            {searchQuery && filteredAndSortedSessions.length !== sessions.length && ` (전체 ${sessions.length}개 중)`}
-            {selectedSessionIds.length > 0 && ` · ${selectedSessionIds.length}개 선택`}
-          </p>
+          {isMounted && (
+            <p className="text-xs text-gray-500">
+              {filteredAndSortedSessions.length}개 파일
+              {filteredAndSortedMemos.length > 0 && ` · ${filteredAndSortedMemos.length}개 메모`}
+              {searchQuery && filteredAndSortedSessions.length !== sessions.length && ` (전체 ${sessions.length}개 중)`}
+              {selectedSessionIds.length > 0 && ` · ${selectedSessionIds.length}개 선택`}
+            </p>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
