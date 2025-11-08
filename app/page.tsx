@@ -55,17 +55,57 @@ export default function Home() {
   
   // 프로젝트 관련 상태
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [userId] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      let stored = localStorage.getItem('athena-user-id');
-      if (!stored) {
-        stored = `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const [userId, setUserId] = useState<string>('');
+  const [userName, setUserName] = useState<string>('');
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+
+  // 구글 로그인 상태 확인 및 userId 설정
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const response = await fetch('/api/auth/status');
+        const data = await response.json();
+        
+        if (data.authenticated && data.user) {
+          // 구글 로그인한 사용자
+          setUserId(data.user.id);
+          setUserName(data.user.name || '');
+          setIsAuthenticated(true);
+          localStorage.setItem('athena-user-id', data.user.id);
+          console.log('✅ 구글 로그인 사용자:', data.user.name, data.user.id);
+        } else {
+          // 로그인하지 않은 경우 - 기존 로직 사용
+          let stored = localStorage.getItem('athena-user-id');
+          if (!stored) {
+            // DB에서 가장 최근에 사용된 userId 찾기
+            const latestResponse = await fetch('/api/sessions/latest-user');
+            if (latestResponse.ok) {
+              const latestData = await latestResponse.json();
+              if (latestData.success && latestData.userId) {
+                stored = latestData.userId;
+                console.log('기존 userId 발견:', stored);
+              } else {
+                stored = `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+              }
+            } else {
+              stored = `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            }
+            localStorage.setItem('athena-user-id', stored);
+          }
+          setUserId(stored);
+          setIsAuthenticated(false);
+        }
+      } catch (error) {
+        console.error('인증 상태 확인 실패:', error);
+        // 실패 시 기본 userId 사용
+        const stored = localStorage.getItem('athena-user-id') || `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         localStorage.setItem('athena-user-id', stored);
+        setUserId(stored);
       }
-      return stored;
-    }
-    return `user-${Date.now()}`;
-  });
+    };
+    
+    checkAuth();
+  }, []);
   
   // Hydration 오류 방지: 클라이언트 마운트 여부 추적
   const [isMounted, setIsMounted] = useState(false);
@@ -324,8 +364,8 @@ export default function Home() {
                 id: m.id,
                 title: m.title,
                 content: m.content,
-                createdAt: m.createdAt,
-                updatedAt: m.updatedAt,
+                createdAt: m.createdAt ? (m.createdAt instanceof Date ? m.createdAt : new Date(m.createdAt)) : new Date(),
+                updatedAt: m.updatedAt ? (m.updatedAt instanceof Date ? m.updatedAt : new Date(m.updatedAt)) : new Date(),
                 type: 'memo' as const,
               }));
               setMemoSessions(restoredMemos);
@@ -370,7 +410,7 @@ export default function Home() {
     if (userId) {
       loadSessions();
     }
-  }, [userId]);
+  }, [userId]); // userId가 변경되면 세션 다시 로드
 
   // 세션이 변경될 때마다 DB와 localStorage에 저장
   useEffect(() => {
@@ -1381,6 +1421,21 @@ export default function Home() {
     showToast('녹음이 취소되었습니다.', 'info');
   };
 
+  // 구글 로그인 핸들러
+  const handleGoogleLogin = () => {
+    window.location.href = '/api/auth/google?action=login';
+  };
+
+  // 로그아웃 핸들러
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout');
+      window.location.reload();
+    } catch (error) {
+      console.error('로그아웃 실패:', error);
+    }
+  };
+
   const handleCopy = async (type: 'transcription' | 'minutes') => {
     if (!selectedSession) return;
 
@@ -1530,6 +1585,43 @@ export default function Home() {
             </div>
           </div>
           
+          {/* 구글 로그인/로그아웃 버튼 */}
+          <div className="mb-3 pb-3 border-b border-gray-200">
+            {isAuthenticated ? (
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white text-xs font-semibold">
+                    {userName ? userName.charAt(0).toUpperCase() : 'U'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-gray-900 truncate">{userName || '사용자'}</p>
+                    <p className="text-xs text-gray-500">구글 로그인</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="text-xs text-red-600 hover:text-red-800 font-medium px-2 py-1 rounded hover:bg-red-50"
+                  title="로그아웃"
+                >
+                  로그아웃
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleGoogleLogin}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg hover:from-blue-600 hover:to-blue-700 transition-colors shadow-sm"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                  <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                  <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                </svg>
+                구글 로그인
+              </button>
+            )}
+          </div>
+
           {/* 검색 입력 */}
           {isMounted && (
             <div className="relative">

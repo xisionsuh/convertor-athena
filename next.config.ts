@@ -41,9 +41,7 @@ const nextConfig: NextConfig = {
     return config;
   },
   // ES modules 지원
-  experimental: {
-    serverComponentsExternalPackages: ['better-sqlite3'],
-  },
+  serverExternalPackages: ['better-sqlite3'],
   // FFmpeg.wasm을 위한 헤더 설정
   async headers() {
     return [
