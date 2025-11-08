@@ -34,6 +34,12 @@ export default function Home() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const [ffmpegLoaded, setFfmpegLoaded] = useState(false);
+  
+  // 검색 및 정렬 관련 상태
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'date' | 'name'>('date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // 녹음 관련 상태
   const [isRecording, setIsRecording] = useState(false);
@@ -48,6 +54,68 @@ export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const selectedSession = sessions.find(s => s.id === selectedSessionId);
+
+  // 검색 및 정렬된 세션 목록
+  const filteredAndSortedSessions = sessions
+    .filter(session => {
+      if (!searchQuery) return true;
+      const query = searchQuery.toLowerCase();
+      return session.fileName.toLowerCase().includes(query) ||
+             session.transcription.toLowerCase().includes(query) ||
+             session.minutes.toLowerCase().includes(query);
+    })
+    .sort((a, b) => {
+      let comparison = 0;
+      if (sortBy === 'date') {
+        comparison = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      } else if (sortBy === 'name') {
+        comparison = a.fileName.localeCompare(b.fileName, 'ko');
+      }
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
+
+  // 키보드 단축키 처리
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 입력 필드에 포커스가 있으면 단축키 무시 (Escape 제외)
+      const isInputFocused = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+      
+      // Ctrl/Cmd + K: 검색 포커스 (항상 작동)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        setSidebarOpen(true);
+        return;
+      }
+      
+      // Escape: 검색 초기화 또는 사이드바 닫기 (입력 필드에서도 작동)
+      if (e.key === 'Escape') {
+        if (searchQuery) {
+          setSearchQuery('');
+          if (isInputFocused) {
+            searchInputRef.current?.blur();
+          }
+        } else if (sidebarOpen && !isInputFocused) {
+          setSidebarOpen(false);
+        }
+        return;
+      }
+      
+      // 입력 필드에 포커스가 있으면 나머지 단축키 무시
+      if (isInputFocused) return;
+      
+      // Delete: 선택된 세션 삭제
+      if (e.key === 'Delete' && selectedSessionId && !isTranscribing && !isCompressing) {
+        const session = sessions.find(s => s.id === selectedSessionId);
+        if (session && session.status !== 'transcribing') {
+          handleDeleteSession(selectedSessionId);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [searchQuery, sidebarOpen, selectedSessionId, isTranscribing, isCompressing, sessions]);
 
   // 토스트 알림 표시
   const showToast = (message: string, type: 'success' | 'info' | 'error' = 'info') => {
@@ -857,8 +925,8 @@ export default function Home() {
 
       {/* 사이드바 */}
       <div className={`${sidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 bg-white shadow-lg overflow-hidden flex flex-col`}>
-        <div className="p-4 border-b">
-          <div className="flex items-center justify-between mb-2">
+        <div className="p-4 border-b space-y-3">
+          <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-900">파일 목록</h2>
             <div className="flex gap-2">
               {sessions.length > 0 && (
@@ -885,11 +953,58 @@ export default function Home() {
               )}
             </div>
           </div>
-          <p className="text-xs text-gray-500">{sessions.length}개 파일 {selectedSessionIds.length > 0 && `(${selectedSessionIds.length}개 선택)`}</p>
+          
+          {/* 검색 입력 */}
+          <div className="relative">
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="검색... (Ctrl+K)"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                ×
+              </button>
+            )}
+          </div>
+          
+          {/* 정렬 옵션 */}
+          {sessions.length > 0 && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-gray-600">정렬:</span>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as 'date' | 'name')}
+                className="px-2 py-1 border border-gray-300 rounded text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="date">날짜</option>
+                <option value="name">이름</option>
+              </select>
+              <button
+                onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                className="px-2 py-1 border border-gray-300 rounded hover:bg-gray-50"
+                title={sortOrder === 'asc' ? '오름차순' : '내림차순'}
+              >
+                {sortOrder === 'asc' ? '↑' : '↓'}
+              </button>
+            </div>
+          )}
+          
+          <p className="text-xs text-gray-500">
+            {filteredAndSortedSessions.length}개 파일
+            {searchQuery && filteredAndSortedSessions.length !== sessions.length && ` (전체 ${sessions.length}개 중)`}
+            {selectedSessionIds.length > 0 && ` · ${selectedSessionIds.length}개 선택`}
+          </p>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          {sessions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).map((session) => (
+          {filteredAndSortedSessions.length > 0 ? filteredAndSortedSessions.map((session) => (
             <div
               key={session.id}
               className={`p-3 rounded-lg transition-colors ${
@@ -970,11 +1085,19 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          ))}
-
-          {sessions.length === 0 && (
+          )) : (
             <div className="text-center text-gray-500 py-8">
-              <p className="text-sm">업로드된 파일이 없습니다</p>
+              <p className="text-sm">
+                {searchQuery ? '검색 결과가 없습니다' : '업로드된 파일이 없습니다'}
+              </p>
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="mt-2 text-xs text-blue-600 hover:text-blue-800"
+                >
+                  검색 초기화
+                </button>
+              )}
             </div>
           )}
         </div>
