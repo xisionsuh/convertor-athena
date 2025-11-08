@@ -265,54 +265,6 @@ export default function Home() {
     }
   };
 
-  const _compressAudio = async (inputFile: File): Promise<File> => {
-    setIsCompressing(true);
-    setCompressionProgress('오디오 압축 준비 중...');
-
-    try {
-      await loadFFmpeg();
-      const ffmpeg = ffmpegRef.current;
-      if (!ffmpeg) throw new Error('FFmpeg not initialized');
-
-      setCompressionProgress('파일 로딩 중...');
-      const inputName = 'input' + inputFile.name.substring(inputFile.name.lastIndexOf('.'));
-      const outputName = 'output.mp3';
-
-      await ffmpeg.writeFile(inputName, await fetchFile(inputFile));
-
-      setCompressionProgress('압축 중... (최대 1~2분 소요)');
-
-      // 오디오를 모노, 96kbps로 압축
-      await ffmpeg.exec([
-        '-i', inputName,
-        '-ac', '1',           // 모노로 변환
-        '-b:a', '96k',        // 비트레이트 96kbps
-        '-ar', '16000',       // 샘플레이트 16kHz
-        outputName
-      ]);
-
-      setCompressionProgress('압축 완료! 파일 저장 중...');
-      const data = await ffmpeg.readFile(outputName);
-      const uint8Data = data as Uint8Array;
-      const arrayBuffer = uint8Data.buffer.slice(
-        uint8Data.byteOffset,
-        uint8Data.byteOffset + uint8Data.byteLength
-      ) as ArrayBuffer;
-      const blob = new Blob([arrayBuffer], { type: 'audio/mp3' });
-      const compressedFile = new File([blob], `compressed_${inputFile.name.replace(/\.[^/.]+$/, '')}.mp3`, { type: 'audio/mp3' });
-
-      setCompressionProgress('');
-      setIsCompressing(false);
-
-      return compressedFile;
-    } catch (error) {
-      console.error('Compression error:', error);
-      setCompressionProgress('');
-      setIsCompressing(false);
-      throw error;
-    }
-  };
-
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const files = Array.from(e.target.files);
