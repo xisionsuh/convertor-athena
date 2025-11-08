@@ -207,6 +207,10 @@ function createWindow() {
       enableWebSQL: false,
       enableBlinkFeatures: '',
       disableBlinkFeatures: 'V8Inspector',
+      // 한글 입력 문제 해결
+      spellcheck: false,
+      // IME 입력 개선
+      experimentalFeatures: false,
     },
     icon: path.join(__dirname, 'icon.png'),
     // 초기 로딩 화면

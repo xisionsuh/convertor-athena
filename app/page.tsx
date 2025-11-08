@@ -858,8 +858,16 @@ export default function Home() {
     showToast('메모가 다운로드되었습니다.', 'success');
   };
 
+  // 한글 입력 중인지 추적
+  const [isComposing, setIsComposing] = useState(false);
+
   // 메모 입력 핸들러 (엔터 처리)
   const handleMemoKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // 한글 입력 중이면 처리하지 않음
+    if (isComposing) {
+      return;
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       const textarea = e.currentTarget;
@@ -897,6 +905,15 @@ export default function Home() {
         }, 0);
       }
     }
+  };
+
+  // 한글 입력 시작/종료 처리
+  const handleCompositionStart = () => {
+    setIsComposing(true);
+  };
+
+  const handleCompositionEnd = () => {
+    setIsComposing(false);
   };
 
   // 녹음 시작
@@ -1168,6 +1185,10 @@ export default function Home() {
               placeholder="검색... (Ctrl+K)"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onCompositionStart={handleCompositionStart}
+              onCompositionEnd={handleCompositionEnd}
+              spellCheck={false}
+              autoComplete="off"
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             {searchQuery && (
@@ -1701,6 +1722,10 @@ export default function Home() {
                     type="text"
                     value={memoTitle}
                     onChange={(e) => setMemoTitle(e.target.value)}
+                    onCompositionStart={handleCompositionStart}
+                    onCompositionEnd={handleCompositionEnd}
+                    spellCheck={false}
+                    autoComplete="off"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="메모 제목"
                   />
@@ -1714,6 +1739,10 @@ export default function Home() {
                     value={memoContent}
                     onChange={(e) => setMemoContent(e.target.value)}
                     onKeyDown={handleMemoKeyDown}
+                    onCompositionStart={handleCompositionStart}
+                    onCompositionEnd={handleCompositionEnd}
+                    spellCheck={false}
+                    autoComplete="off"
                     className="w-full h-full min-h-[400px] px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-mono text-sm"
                     placeholder="메모를 입력하세요..."
                   />
