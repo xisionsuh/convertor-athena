@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import type { MemoSession } from './types';
 
 interface FileSession {
   id: string;
@@ -40,6 +41,14 @@ export default function Home() {
   const [sortBy, setSortBy] = useState<'date' | 'name'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const searchInputRef = useRef<HTMLInputElement>(null);
+  
+  // 메모장 관련 상태
+  const [memoSessions, setMemoSessions] = useState<MemoSession[]>([]);
+  const [selectedMemoId, setSelectedMemoId] = useState<string | null>(null);
+  const [memoContent, setMemoContent] = useState('');
+  const [memoTitle, setMemoTitle] = useState('');
+  const [memoPanelOpen, setMemoPanelOpen] = useState(false);
+  const memoTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // 녹음 관련 상태
   const [isRecording, setIsRecording] = useState(false);
@@ -55,7 +64,7 @@ export default function Home() {
 
   const selectedSession = sessions.find(s => s.id === selectedSessionId);
 
-  // 검색 및 정렬된 세션 목록
+  // 검색 및 정렬된 세션 목록 (파일)
   const filteredAndSortedSessions = sessions
     .filter(session => {
       if (!searchQuery) return true;
@@ -70,6 +79,24 @@ export default function Home() {
         comparison = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       } else if (sortBy === 'name') {
         comparison = a.fileName.localeCompare(b.fileName, 'ko');
+      }
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
+
+  // 검색 및 정렬된 메모 목록
+  const filteredAndSortedMemos = memoSessions
+    .filter(memo => {
+      if (!searchQuery) return true;
+      const query = searchQuery.toLowerCase();
+      return memo.title.toLowerCase().includes(query) ||
+             memo.content.toLowerCase().includes(query);
+    })
+    .sort((a, b) => {
+      let comparison = 0;
+      if (sortBy === 'date') {
+        comparison = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      } else if (sortBy === 'name') {
+        comparison = a.title.localeCompare(b.title, 'ko');
       }
       return sortOrder === 'asc' ? comparison : -comparison;
     });
@@ -236,6 +263,62 @@ export default function Home() {
       // 저장 실패해도 앱은 계속 작동
     }
   }, [sessions]);
+
+  // 메모 세션 localStorage에서 복원
+  useEffect(() => {
+    try {
+      const savedMemos = localStorage.getItem('meeting-memos');
+      if (savedMemos) {
+        try {
+          const parsed = JSON.parse(savedMemos);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const restoredMemos = parsed.map((m: MemoSession) => ({
+              ...m,
+              createdAt: m.createdAt ? new Date(m.createdAt) : new Date(),
+              updatedAt: m.updatedAt ? new Date(m.updatedAt) : new Date(),
+            }));
+            setMemoSessions(restoredMemos);
+          }
+        } catch (error) {
+          console.error('메모 데이터 파싱 실패:', error);
+          localStorage.removeItem('meeting-memos');
+        }
+      }
+    } catch (error) {
+      console.error('localStorage 접근 실패:', error);
+    }
+  }, []);
+
+  // 메모 세션이 변경될 때마다 localStorage에 저장
+  useEffect(() => {
+    try {
+      const memosToSave = memoSessions.map(m => ({
+        id: m.id,
+        title: m.title,
+        content: m.content,
+        createdAt: m.createdAt,
+        updatedAt: m.updatedAt,
+        type: m.type,
+      }));
+      localStorage.setItem('meeting-memos', JSON.stringify(memosToSave));
+    } catch (error) {
+      console.error('메모 localStorage 저장 실패:', error);
+    }
+  }, [memoSessions]);
+
+  // 선택된 메모 로드
+  useEffect(() => {
+    if (selectedMemoId) {
+      const memo = memoSessions.find(m => m.id === selectedMemoId);
+      if (memo) {
+        setMemoContent(memo.content);
+        setMemoTitle(memo.title);
+      }
+    } else {
+      setMemoContent('');
+      setMemoTitle('');
+    }
+  }, [selectedMemoId, memoSessions]);
 
   // FFmpeg은 클라이언트에서만 초기화
   useEffect(() => {
@@ -703,6 +786,119 @@ export default function Home() {
     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // 시스템 시간 포맷팅
+  const formatSystemTime = () => {
+    const now = new Date();
+    const hrs = now.getHours().toString().padStart(2, '0');
+    const mins = now.getMinutes().toString().padStart(2, '0');
+    const secs = now.getSeconds().toString().padStart(2, '0');
+    return `${hrs}:${mins}:${secs}`;
+  };
+
+  // 메모 생성
+  const createMemo = () => {
+    const newMemo: MemoSession = {
+      id: `memo-${Date.now()}`,
+      title: memoTitle || `메모 ${memoSessions.length + 1}`,
+      content: '',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      type: 'memo',
+    };
+    setMemoSessions(prev => [...prev, newMemo]);
+    setSelectedMemoId(newMemo.id);
+    setMemoTitle(newMemo.title);
+    setMemoContent('');
+    setMemoPanelOpen(true);
+    showToast('새 메모가 생성되었습니다.', 'success');
+  };
+
+  // 메모 저장
+  const saveMemo = () => {
+    if (!selectedMemoId) {
+      createMemo();
+      return;
+    }
+
+    setMemoSessions(prev => prev.map(memo => 
+      memo.id === selectedMemoId 
+        ? { ...memo, content: memoContent, title: memoTitle || memo.title, updatedAt: new Date() }
+        : memo
+    ));
+    showToast('메모가 저장되었습니다.', 'success');
+  };
+
+  // 메모 삭제
+  const deleteMemo = (memoId: string) => {
+    setMemoSessions(prev => prev.filter(m => m.id !== memoId));
+    if (selectedMemoId === memoId) {
+      setSelectedMemoId(null);
+      setMemoContent('');
+      setMemoTitle('');
+    }
+    showToast('메모가 삭제되었습니다.', 'info');
+  };
+
+  // 메모 다운로드
+  const downloadMemo = () => {
+    if (!selectedMemoId) return;
+    const memo = memoSessions.find(m => m.id === selectedMemoId);
+    if (!memo) return;
+
+    const content = `제목: ${memo.title}\n생성일: ${memo.createdAt.toLocaleString('ko-KR')}\n수정일: ${memo.updatedAt.toLocaleString('ko-KR')}\n\n${memo.content}`;
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${memo.title.replace(/[^a-z0-9가-힣]/gi, '_')}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('메모가 다운로드되었습니다.', 'success');
+  };
+
+  // 메모 입력 핸들러 (엔터 처리)
+  const handleMemoKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const textarea = e.currentTarget;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const currentText = memoContent;
+      
+      // 현재 줄의 텍스트 확인
+      const lines = currentText.substring(0, start).split('\n');
+      const currentLine = lines[lines.length - 1];
+      
+      // 빈 줄이 아니면 시간 추가
+      if (currentLine.trim() !== '') {
+        let timeStamp = '';
+        if (isRecording) {
+          timeStamp = ` [${formatRecordingTime(recordingTime)}]`;
+        } else {
+          timeStamp = ` [${formatSystemTime()}]`;
+        }
+        
+        const newText = currentText.substring(0, start) + timeStamp + '\n' + currentText.substring(end);
+        setMemoContent(newText);
+        
+        // 커서 위치 조정
+        setTimeout(() => {
+          const newPosition = start + timeStamp.length + 1;
+          textarea.setSelectionRange(newPosition, newPosition);
+        }, 0);
+      } else {
+        // 빈 줄이면 그냥 줄바꿈만
+        const newText = currentText.substring(0, start) + '\n' + currentText.substring(end);
+        setMemoContent(newText);
+        setTimeout(() => {
+          textarea.setSelectionRange(start + 1, start + 1);
+        }, 0);
+      }
+    }
+  };
+
   // 녹음 시작
   const startRecording = async () => {
     try {
@@ -929,6 +1125,16 @@ export default function Home() {
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-900">파일 목록</h2>
             <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  createMemo();
+                  setMemoPanelOpen(true);
+                }}
+                className="text-xs text-green-600 hover:text-green-800 font-medium"
+                title="새 메모"
+              >
+                + 메모
+              </button>
               {sessions.length > 0 && (
                 <button
                   onClick={() => {
@@ -998,13 +1204,18 @@ export default function Home() {
           
           <p className="text-xs text-gray-500">
             {filteredAndSortedSessions.length}개 파일
+            {filteredAndSortedMemos.length > 0 && ` · ${filteredAndSortedMemos.length}개 메모`}
             {searchQuery && filteredAndSortedSessions.length !== sessions.length && ` (전체 ${sessions.length}개 중)`}
             {selectedSessionIds.length > 0 && ` · ${selectedSessionIds.length}개 선택`}
           </p>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          {filteredAndSortedSessions.length > 0 ? filteredAndSortedSessions.map((session) => (
+          {/* 파일 세션 목록 */}
+          {filteredAndSortedSessions.length > 0 && (
+            <div className="mb-4">
+              <h3 className="text-xs font-semibold text-gray-600 mb-2">📁 파일</h3>
+              {filteredAndSortedSessions.map((session) => (
             <div
               key={session.id}
               className={`p-3 rounded-lg transition-colors ${
@@ -1085,7 +1296,60 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          )) : (
+              ))}
+            </div>
+          )}
+
+          {/* 메모 세션 목록 */}
+          {filteredAndSortedMemos.length > 0 && (
+            <div className="mt-4">
+              <h3 className="text-xs font-semibold text-gray-600 mb-2">📝 메모</h3>
+              {filteredAndSortedMemos.map((memo) => (
+                <div
+                  key={memo.id}
+                  className={`p-3 rounded-lg transition-colors mb-2 ${
+                    selectedMemoId === memo.id
+                      ? 'bg-green-50 border-2 border-green-500'
+                      : 'bg-gray-50 hover:bg-gray-100 border-2 border-transparent'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <div
+                      className="flex-1 min-w-0 cursor-pointer"
+                      onClick={() => {
+                        setSelectedMemoId(memo.id);
+                        setSelectedSessionId(null);
+                        setMemoPanelOpen(true);
+                      }}
+                    >
+                      <p className="text-sm font-medium text-gray-900 truncate" title={memo.title}>
+                        {memo.title}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                        {memo.content.substring(0, 50)}{memo.content.length > 50 ? '...' : ''}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {memo.updatedAt.toLocaleDateString('ko-KR')}
+                      </p>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteMemo(memo.id);
+                      }}
+                      className="text-gray-400 hover:text-red-600 text-lg leading-none"
+                      title="삭제"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 빈 상태 메시지 */}
+          {filteredAndSortedSessions.length === 0 && filteredAndSortedMemos.length === 0 && (
             <div className="text-center text-gray-500 py-8">
               <p className="text-sm">
                 {searchQuery ? '검색 결과가 없습니다' : '업로드된 파일이 없습니다'}
@@ -1113,8 +1377,9 @@ export default function Home() {
       </button>
 
       {/* 메인 콘텐츠 */}
-      <div className="flex-1 overflow-y-auto p-8">
-        <div className="max-w-4xl mx-auto">
+      <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 overflow-y-auto p-8">
+          <div className="max-w-4xl mx-auto">
           <div className="text-center mb-8">
             <h1 className="text-4xl font-bold text-gray-900 mb-4">
               회의 녹음 변환기
@@ -1376,7 +1641,107 @@ export default function Home() {
               <p className="text-gray-500">파일을 업로드해주세요</p>
             </div>
           )}
+          </div>
         </div>
+
+        {/* 메모 패널 */}
+        <div className={`${memoPanelOpen ? 'w-96' : 'w-0'} transition-all duration-300 bg-white shadow-lg overflow-hidden flex flex-col border-l border-gray-200`}>
+          <div className="p-4 border-b flex items-center justify-between">
+            <h2 className="text-lg font-bold text-gray-900">📝 메모장</h2>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  if (selectedMemoId) {
+                    saveMemo();
+                  } else {
+                    createMemo();
+                  }
+                }}
+                className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                {selectedMemoId ? '저장' : '새 메모'}
+              </button>
+              {selectedMemoId && (
+                <>
+                  <button
+                    onClick={downloadMemo}
+                    className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                  >
+                    다운로드
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSelectedMemoId(null);
+                      setMemoContent('');
+                      setMemoTitle('');
+                    }}
+                    className="px-3 py-1 text-sm bg-gray-500 text-white rounded hover:bg-gray-600"
+                  >
+                    닫기
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => setMemoPanelOpen(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {selectedMemoId ? (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    제목
+                  </label>
+                  <input
+                    type="text"
+                    value={memoTitle}
+                    onChange={(e) => setMemoTitle(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="메모 제목"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    내용 (Enter: 시간 기록, Shift+Enter: 줄바꿈)
+                  </label>
+                  <textarea
+                    ref={memoTextareaRef}
+                    value={memoContent}
+                    onChange={(e) => setMemoContent(e.target.value)}
+                    onKeyDown={handleMemoKeyDown}
+                    className="w-full h-full min-h-[400px] px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-mono text-sm"
+                    placeholder="메모를 입력하세요..."
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="text-center text-gray-500 py-12">
+                <p className="text-sm mb-4">메모를 시작하려면 "새 메모" 버튼을 클릭하세요</p>
+                <p className="text-xs text-gray-400">
+                  • Enter 키를 누르면 문장 끝에 시간이 기록됩니다<br/>
+                  • 녹음 중이면 녹음 시간이 기록됩니다<br/>
+                  • 빈 줄에서는 시간이 기록되지 않습니다
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 메모 패널 토글 버튼 */}
+        {!memoPanelOpen && (
+          <button
+            onClick={() => setMemoPanelOpen(true)}
+            className="fixed right-0 top-1/2 -translate-y-1/2 bg-white shadow-md p-2 rounded-l-lg hover:bg-gray-50 z-10 border border-gray-200"
+            title="메모장 열기"
+          >
+            📝
+          </button>
+        )}
       </div>
     </div>
   );

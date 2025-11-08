@@ -39,3 +39,14 @@ export interface SummarizationResponse {
   minutes: string;
   error?: string;
 }
+
+export interface MemoSession {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: Date;
+  updatedAt: Date;
+  type: 'memo';
+}
+
+export type SessionItem = FileSession | MemoSession;
