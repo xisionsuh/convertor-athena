@@ -1238,7 +1238,8 @@ export default function Home() {
       <div className="flex flex-1 overflow-hidden">
 
       {/* 사이드바 */}
-      <div className={`${sidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 bg-white shadow-lg overflow-hidden flex flex-col`}>
+      {isMounted && (
+        <div className={`${sidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 bg-white shadow-lg overflow-hidden flex flex-col`}>
         <div className="p-4 border-b space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-900">파일 목록</h2>
@@ -1493,7 +1494,8 @@ export default function Home() {
             </div>
           )}
         </div>
-      </div>
+        </div>
+      )}
 
       {/* 사이드바 토글 버튼 */}
       <button
