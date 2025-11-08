@@ -160,7 +160,7 @@ export default function Home() {
     }, 3000);
   };
 
-  // 웨이브폼 그리기 (오른쪽에서 왼쪽으로 흐르는 바 형태)
+  // 웨이브폼 그리기 (isPaused 변경 시 색상 업데이트)
   useEffect(() => {
     if (isRecording && canvasRef.current && analyserRef.current) {
       const canvas = canvasRef.current;
@@ -171,11 +171,7 @@ export default function Home() {
 
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
-      
-      // 웨이브폼 데이터를 저장할 배열 (오른쪽에서 왼쪽으로 흐르는 효과)
-      const waveformData: number[] = [];
-      const maxDataPoints = 64; // 표시할 바의 개수
-      
+
       let animationId: number | null = null;
 
       const draw = () => {
@@ -187,74 +183,34 @@ export default function Home() {
           return;
         }
 
-        analyser.getByteFrequencyData(dataArray);
+        analyser.getByteTimeDomainData(dataArray);
 
-        // 현재 데이터를 배열 앞에 추가 (오른쪽에서 왼쪽으로 흐르는 효과)
-        const currentData = Array.from(dataArray.slice(0, bufferLength / 4))
-          .reduce((sum, val) => sum + val, 0) / (bufferLength / 4);
-        
-        waveformData.unshift(currentData);
-        if (waveformData.length > maxDataPoints) {
-          waveformData.pop();
-        }
-
-        // 캔버스 초기화
-        canvasCtx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+        canvasCtx.fillStyle = 'rgb(255, 255, 255)';
         canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // 그라데이션 배경
-        const gradient = canvasCtx.createLinearGradient(0, 0, canvas.width, 0);
-        gradient.addColorStop(0, 'rgba(59, 130, 246, 0.1)');
-        gradient.addColorStop(0.5, 'rgba(139, 92, 246, 0.1)');
-        gradient.addColorStop(1, 'rgba(236, 72, 153, 0.1)');
-        canvasCtx.fillStyle = gradient;
-        canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+        canvasCtx.lineWidth = 2;
+        canvasCtx.strokeStyle = isPaused ? 'rgb(234, 179, 8)' : 'rgb(220, 38, 38)';
 
-        // 바 그리기
-        const barWidth = canvas.width / maxDataPoints;
-        const barSpacing = barWidth * 0.3;
-        const actualBarWidth = barWidth - barSpacing;
-        const centerY = canvas.height / 2;
+        canvasCtx.beginPath();
 
-        waveformData.forEach((value, index) => {
-          const x = index * barWidth + barSpacing / 2;
-          const normalizedValue = value / 255;
-          const barHeight = normalizedValue * canvas.height * 0.8;
-          
-          // 그라데이션 생성
-          const barGradient = canvasCtx.createLinearGradient(x, centerY - barHeight, x, centerY + barHeight);
-          
-          if (isPaused) {
-            barGradient.addColorStop(0, 'rgba(234, 179, 8, 0.8)');
-            barGradient.addColorStop(0.5, 'rgba(234, 179, 8, 1)');
-            barGradient.addColorStop(1, 'rgba(234, 179, 8, 0.8)');
+        const sliceWidth = canvas.width / bufferLength;
+        let x = 0;
+
+        for (let i = 0; i < bufferLength; i++) {
+          const v = dataArray[i] / 128.0;
+          const y = (v * canvas.height) / 2;
+
+          if (i === 0) {
+            canvasCtx.moveTo(x, y);
           } else {
-            // 녹음 중일 때 동적인 그라데이션
-            const hue = (index / maxDataPoints) * 60 + 200; // 파란색에서 분홍색으로
-            barGradient.addColorStop(0, `hsla(${hue}, 70%, 60%, ${0.6 + normalizedValue * 0.4})`);
-            barGradient.addColorStop(0.5, `hsla(${hue}, 80%, 55%, ${0.8 + normalizedValue * 0.2})`);
-            barGradient.addColorStop(1, `hsla(${hue}, 70%, 60%, ${0.6 + normalizedValue * 0.4})`);
+            canvasCtx.lineTo(x, y);
           }
 
-          canvasCtx.fillStyle = barGradient;
-          
-          // 상단 바
-          canvasCtx.fillRect(x, centerY - barHeight, actualBarWidth, barHeight);
-          
-          // 하단 바 (대칭)
-          canvasCtx.fillRect(x, centerY, actualBarWidth, barHeight);
-          
-          // 반사 효과 (하단)
-          const reflectionGradient = canvasCtx.createLinearGradient(x, centerY, x, centerY + barHeight);
-          reflectionGradient.addColorStop(0, `rgba(255, 255, 255, ${normalizedValue * 0.3})`);
-          reflectionGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-          canvasCtx.fillStyle = reflectionGradient;
-          canvasCtx.fillRect(x, centerY, actualBarWidth, barHeight);
-        });
+          x += sliceWidth;
+        }
 
-        // 부드러운 애니메이션을 위한 블러 효과 (선택적)
-        canvasCtx.globalAlpha = 0.95;
-        canvasCtx.globalCompositeOperation = 'source-over';
+        canvasCtx.lineTo(canvas.width, canvas.height / 2);
+        canvasCtx.stroke();
 
         animationId = requestAnimationFrame(draw);
         animationFrameRef.current = animationId;
@@ -1264,11 +1220,11 @@ export default function Home() {
                     ✕ 취소
                   </button>
                 </div>
-                <div className="hidden md:block w-48 h-12 rounded-lg overflow-hidden bg-gradient-to-r from-blue-50 via-purple-50 to-pink-50 border border-gray-200 shadow-inner">
+                <div className="hidden md:block w-32 h-8">
                   <canvas
                     ref={canvasRef}
-                    width="192"
-                    height="48"
+                    width="128"
+                    height="32"
                     className="w-full h-full"
                   />
                 </div>
