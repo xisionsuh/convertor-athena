@@ -49,6 +49,13 @@ export default function Home() {
   const [memoTitle, setMemoTitle] = useState('');
   const [memoPanelOpen, setMemoPanelOpen] = useState(false);
   const memoTextareaRef = useRef<HTMLTextAreaElement>(null);
+  
+  // Hydration 오류 방지: 클라이언트 마운트 여부 추적
+  const [isMounted, setIsMounted] = useState(false);
+  
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // 녹음 관련 상태
   const [isRecording, setIsRecording] = useState(false);
@@ -1142,17 +1149,19 @@ export default function Home() {
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-900">파일 목록</h2>
             <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  createMemo();
-                  setMemoPanelOpen(true);
-                }}
-                className="text-xs text-green-600 hover:text-green-800 font-medium"
-                title="새 메모"
-              >
-                + 메모
-              </button>
-              {sessions.length > 0 && (
+              {isMounted && (
+                <button
+                  onClick={() => {
+                    createMemo();
+                    setMemoPanelOpen(true);
+                  }}
+                  className="text-xs text-green-600 hover:text-green-800 font-medium"
+                  title="새 메모"
+                >
+                  + 메모
+                </button>
+              )}
+              {isMounted && sessions.length > 0 && (
                 <button
                   onClick={() => {
                     if (selectedSessionIds.length === sessions.length) {
@@ -1166,7 +1175,7 @@ export default function Home() {
                   {selectedSessionIds.length === sessions.length ? '전체 해제' : '전체 선택'}
                 </button>
               )}
-              {selectedSessionIds.length > 0 && selectedSessionIds.length < sessions.length && (
+              {isMounted && selectedSessionIds.length > 0 && selectedSessionIds.length < sessions.length && (
                 <button
                   onClick={() => setSelectedSessionIds([])}
                   className="text-xs text-gray-600 hover:text-gray-800"
@@ -1178,31 +1187,33 @@ export default function Home() {
           </div>
           
           {/* 검색 입력 */}
-          <div className="relative">
-            <input
-              ref={searchInputRef}
-              type="text"
-              placeholder="검색... (Ctrl+K)"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onCompositionStart={handleCompositionStart}
-              onCompositionEnd={handleCompositionEnd}
-              spellCheck={false}
-              autoComplete="off"
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                ×
-              </button>
-            )}
-          </div>
+          {isMounted && (
+            <div className="relative">
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="검색... (Ctrl+K)"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onCompositionStart={handleCompositionStart}
+                onCompositionEnd={handleCompositionEnd}
+                spellCheck={false}
+                autoComplete="off"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          )}
           
           {/* 정렬 옵션 */}
-          {sessions.length > 0 && (
+          {isMounted && sessions.length > 0 && (
             <div className="flex items-center gap-2 text-xs">
               <span className="text-gray-600">정렬:</span>
               <select
