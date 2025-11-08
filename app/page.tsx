@@ -172,10 +172,17 @@ export default function Home() {
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
 
-      const draw = () => {
-        if (!isRecording) return; // 녹음이 끝나면 중지
+      let animationId: number | null = null;
 
-        animationFrameRef.current = requestAnimationFrame(draw);
+      const draw = () => {
+        // 녹음이 끝났거나 canvas/analyser가 없으면 중지
+        if (!isRecording || !canvasRef.current || !analyserRef.current) {
+          if (animationId !== null) {
+            cancelAnimationFrame(animationId);
+          }
+          return;
+        }
+
         analyser.getByteTimeDomainData(dataArray);
 
         canvasCtx.fillStyle = 'rgb(255, 255, 255)';
@@ -204,9 +211,29 @@ export default function Home() {
 
         canvasCtx.lineTo(canvas.width, canvas.height / 2);
         canvasCtx.stroke();
+
+        animationId = requestAnimationFrame(draw);
+        animationFrameRef.current = animationId;
       };
 
       draw();
+
+      // cleanup 함수
+      return () => {
+        if (animationId !== null) {
+          cancelAnimationFrame(animationId);
+        }
+        if (animationFrameRef.current !== null) {
+          cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
+        }
+      };
+    } else {
+      // 녹음이 아닐 때 애니메이션 정리
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
     }
   }, [isRecording, isPaused]);
 
@@ -1192,16 +1219,14 @@ export default function Home() {
                   ✕ 취소
                 </button>
               </div>
-              {canvasRef.current && (
-                <div className="hidden md:block w-32 h-8">
-                  <canvas
-                    ref={canvasRef}
-                    width="128"
-                    height="32"
-                    className="w-full h-full"
-                  />
-                </div>
-              )}
+              <div className="hidden md:block w-32 h-8">
+                <canvas
+                  ref={canvasRef}
+                  width="128"
+                  height="32"
+                  className="w-full h-full"
+                />
+              </div>
             </>
           )}
         </div>
