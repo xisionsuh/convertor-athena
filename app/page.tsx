@@ -1171,66 +1171,68 @@ export default function Home() {
       </div>
 
       {/* 상단 녹음기 바 */}
-      <div className="bg-white border-b border-gray-200 shadow-sm px-4 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-3 flex-1">
-          {!isRecording ? (
-            <>
-              <button
-                onClick={startRecording}
-                disabled={isTranscribing || isCompressing}
-                className="bg-red-600 hover:bg-red-700 text-white py-1.5 px-4 rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                <span className="text-sm">●</span> 녹음 시작
-              </button>
-              <span className="text-xs text-gray-500">음성 녹음 후 바로 텍스트로 변환할 수 있습니다</span>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-red-600 animate-pulse'}`}></div>
-                <span className="text-sm font-mono font-medium text-gray-900">
-                  {formatRecordingTime(recordingTime)}
-                </span>
-                {isPaused && <span className="text-xs text-yellow-600">일시정지</span>}
-              </div>
-              <div className="flex items-center gap-2">
+      {isMounted && (
+        <div className="bg-white border-b border-gray-200 shadow-sm px-4 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-3 flex-1">
+            {!isRecording ? (
+              <>
                 <button
-                  onClick={togglePauseRecording}
-                  className="bg-yellow-500 hover:bg-yellow-600 text-white py-1 px-3 rounded text-xs font-medium transition-colors"
+                  onClick={startRecording}
+                  disabled={isTranscribing || isCompressing}
+                  className="bg-red-600 hover:bg-red-700 text-white py-1.5 px-4 rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  {isPaused ? '▶ 재개' : '⏸ 일시정지'}
+                  <span className="text-sm">●</span> 녹음 시작
                 </button>
-                <button
-                  onClick={() => stopRecording(false)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded text-xs font-medium transition-colors"
-                >
-                  ■ 저장
-                </button>
-                <button
-                  onClick={() => stopRecording(true)}
-                  className="bg-green-600 hover:bg-green-700 text-white py-1 px-3 rounded text-xs font-medium transition-colors"
-                >
-                  ■ 저장 & 변환
-                </button>
-                <button
-                  onClick={cancelRecording}
-                  className="bg-gray-500 hover:bg-gray-600 text-white py-1 px-3 rounded text-xs font-medium transition-colors"
-                >
-                  ✕ 취소
-                </button>
-              </div>
-              <div className="hidden md:block w-32 h-8">
-                <canvas
-                  ref={canvasRef}
-                  width="128"
-                  height="32"
-                  className="w-full h-full"
-                />
-              </div>
-            </>
-          )}
+                <span className="text-xs text-gray-500">음성 녹음 후 바로 텍스트로 변환할 수 있습니다</span>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-red-600 animate-pulse'}`}></div>
+                  <span className="text-sm font-mono font-medium text-gray-900">
+                    {formatRecordingTime(recordingTime)}
+                  </span>
+                  {isPaused && <span className="text-xs text-yellow-600">일시정지</span>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={togglePauseRecording}
+                    className="bg-yellow-500 hover:bg-yellow-600 text-white py-1 px-3 rounded text-xs font-medium transition-colors"
+                  >
+                    {isPaused ? '▶ 재개' : '⏸ 일시정지'}
+                  </button>
+                  <button
+                    onClick={() => stopRecording(false)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded text-xs font-medium transition-colors"
+                  >
+                    ■ 저장
+                  </button>
+                  <button
+                    onClick={() => stopRecording(true)}
+                    className="bg-green-600 hover:bg-green-700 text-white py-1 px-3 rounded text-xs font-medium transition-colors"
+                  >
+                    ■ 저장 & 변환
+                  </button>
+                  <button
+                    onClick={cancelRecording}
+                    className="bg-gray-500 hover:bg-gray-600 text-white py-1 px-3 rounded text-xs font-medium transition-colors"
+                  >
+                    ✕ 취소
+                  </button>
+                </div>
+                <div className="hidden md:block w-32 h-8">
+                  <canvas
+                    ref={canvasRef}
+                    width="128"
+                    height="32"
+                    className="w-full h-full"
+                  />
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 메인 레이아웃 */}
       <div className="flex flex-1 overflow-hidden">
