@@ -47,7 +47,7 @@ export default function Home() {
   const [selectedMemoId, setSelectedMemoId] = useState<string | null>(null);
   const [memoContent, setMemoContent] = useState('');
   const [memoTitle, setMemoTitle] = useState('');
-  const [memoPanelOpen, setMemoPanelOpen] = useState(false);
+  const [memoPanelOpen, setMemoPanelOpen] = useState(true); // 기본적으로 메모장 열림
   const memoTextareaRef = useRef<HTMLTextAreaElement>(null);
   
   // Hydration 오류 방지: 클라이언트 마운트 여부 추적
@@ -1126,7 +1126,7 @@ export default function Home() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-100">
+    <div className="flex flex-col h-screen bg-gray-100">
       {/* 토스트 알림 */}
       <div className="fixed top-4 right-4 z-50 space-y-2">
         {toasts.map(toast => (
@@ -1142,6 +1142,73 @@ export default function Home() {
           </div>
         ))}
       </div>
+
+      {/* 상단 녹음기 바 */}
+      <div className="bg-white border-b border-gray-200 shadow-sm px-4 py-2 flex items-center justify-between">
+        <div className="flex items-center gap-3 flex-1">
+          {!isRecording ? (
+            <>
+              <button
+                onClick={startRecording}
+                disabled={isTranscribing || isCompressing}
+                className="bg-red-600 hover:bg-red-700 text-white py-1.5 px-4 rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <span className="text-sm">●</span> 녹음 시작
+              </button>
+              <span className="text-xs text-gray-500">음성 녹음 후 바로 텍스트로 변환할 수 있습니다</span>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-red-600 animate-pulse'}`}></div>
+                <span className="text-sm font-mono font-medium text-gray-900">
+                  {formatRecordingTime(recordingTime)}
+                </span>
+                {isPaused && <span className="text-xs text-yellow-600">일시정지</span>}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={togglePauseRecording}
+                  className="bg-yellow-500 hover:bg-yellow-600 text-white py-1 px-3 rounded text-xs font-medium transition-colors"
+                >
+                  {isPaused ? '▶ 재개' : '⏸ 일시정지'}
+                </button>
+                <button
+                  onClick={() => stopRecording(false)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded text-xs font-medium transition-colors"
+                >
+                  ■ 저장
+                </button>
+                <button
+                  onClick={() => stopRecording(true)}
+                  className="bg-green-600 hover:bg-green-700 text-white py-1 px-3 rounded text-xs font-medium transition-colors"
+                >
+                  ■ 저장 & 변환
+                </button>
+                <button
+                  onClick={cancelRecording}
+                  className="bg-gray-500 hover:bg-gray-600 text-white py-1 px-3 rounded text-xs font-medium transition-colors"
+                >
+                  ✕ 취소
+                </button>
+              </div>
+              {canvasRef.current && (
+                <div className="hidden md:block w-32 h-8">
+                  <canvas
+                    ref={canvasRef}
+                    width="128"
+                    height="32"
+                    className="w-full h-full"
+                  />
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* 메인 레이아웃 */}
+      <div className="flex flex-1 overflow-hidden">
 
       {/* 사이드바 */}
       <div className={`${sidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 bg-white shadow-lg overflow-hidden flex flex-col`}>
@@ -1410,143 +1477,107 @@ export default function Home() {
         {sidebarOpen ? '◀' : '▶'}
       </button>
 
-      {/* 메인 콘텐츠 */}
+      {/* 메인 콘텐츠 영역 - 메모장이 기본 */}
       <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1 overflow-y-auto p-8">
-          <div className="max-w-4xl mx-auto">
-          <div className="text-center mb-8">
-            <h1 className="text-4xl font-bold text-gray-900 mb-4">
-              회의 녹음 변환기
-            </h1>
-            <p className="text-lg text-gray-600">
-              여러 파일을 한번에 업로드하고 관리하세요
-            </p>
+        {/* 메모 패널 - 기본적으로 열려있고 메인 영역 차지 */}
+        <div className={`${memoPanelOpen ? 'flex-1' : 'w-0'} transition-all duration-300 bg-white shadow-lg overflow-hidden flex flex-col`}>
+          <div className="p-4 border-b flex items-center justify-between">
+            <h2 className="text-lg font-bold text-gray-900">📝 메모장</h2>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  if (selectedMemoId) {
+                    saveMemo();
+                  } else {
+                    createMemo();
+                  }
+                }}
+                className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                {selectedMemoId ? '저장' : '새 메모'}
+              </button>
+              {selectedMemoId && (
+                <>
+                  <button
+                    onClick={downloadMemo}
+                    className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                  >
+                    다운로드
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSelectedMemoId(null);
+                      setMemoContent('');
+                      setMemoTitle('');
+                    }}
+                    className="px-3 py-1 text-sm bg-gray-500 text-white rounded hover:bg-gray-600"
+                  >
+                    닫기
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => setMemoPanelOpen(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ×
+              </button>
+            </div>
           </div>
 
-          {/* 녹음기 영역 */}
-          <div className="bg-gradient-to-r from-red-50 to-pink-50 rounded-lg shadow p-6 mb-6 border-2 border-red-200">
-            <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-              🎙️ 녹음기
-            </h3>
-
-            {!isRecording ? (
-              <div className="space-y-4">
-                <p className="text-sm text-gray-600">음성 녹음 후 바로 텍스트로 변환할 수 있습니다.</p>
-                <button
-                  onClick={startRecording}
-                  disabled={isTranscribing || isCompressing}
-                  className="w-full bg-red-600 hover:bg-red-700 text-white py-3 px-6 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  <span className="text-xl">●</span> 녹음 시작
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {/* 웨이브폼 시각화 */}
-                <div className="bg-white rounded-lg p-3 border-2 border-red-300">
-                  <canvas
-                    ref={canvasRef}
-                    width="600"
-                    height="100"
-                    className="w-full h-24"
+          <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ minHeight: 'calc(100vh - 120px)' }}>
+            {selectedMemoId ? (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    제목
+                  </label>
+                  <input
+                    type="text"
+                    value={memoTitle}
+                    onChange={(e) => setMemoTitle(e.target.value)}
+                    onCompositionStart={handleCompositionStart}
+                    onCompositionEnd={handleCompositionEnd}
+                    spellCheck={false}
+                    autoComplete="off"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="메모 제목"
                   />
                 </div>
-
-                {/* 녹음 시간 표시 */}
-                <div className="flex items-center justify-center gap-3 p-4 bg-white rounded-lg">
-                  <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-red-600 animate-pulse'}`}></div>
-                  <span className="text-3xl font-mono font-bold text-gray-900">
-                    {formatRecordingTime(recordingTime)}
-                  </span>
-                  {isPaused && <span className="text-sm text-yellow-600 font-medium">일시정지</span>}
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    내용 (Enter: 시간 기록, Shift+Enter: 줄바꿈)
+                  </label>
+                  <textarea
+                    ref={memoTextareaRef}
+                    value={memoContent}
+                    onChange={(e) => setMemoContent(e.target.value)}
+                    onKeyDown={handleMemoKeyDown}
+                    onCompositionStart={handleCompositionStart}
+                    onCompositionEnd={handleCompositionEnd}
+                    spellCheck={false}
+                    autoComplete="off"
+                    className="w-full h-full min-h-[600px] px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-mono text-sm"
+                    placeholder="메모를 입력하세요..."
+                  />
                 </div>
-
-                {/* 녹음 컨트롤 버튼 */}
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={togglePauseRecording}
-                    className="bg-yellow-500 hover:bg-yellow-600 text-white py-3 px-4 rounded-lg font-medium transition-colors"
-                  >
-                    {isPaused ? '▶ 재개' : '⏸ 일시정지'}
-                  </button>
-                  <button
-                    onClick={() => stopRecording(false)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg font-medium transition-colors"
-                  >
-                    ■ 저장
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => stopRecording(true)}
-                    className="bg-green-600 hover:bg-green-700 text-white py-3 px-4 rounded-lg font-medium transition-colors"
-                  >
-                    ■ 저장 & 변환
-                  </button>
-                  <button
-                    onClick={cancelRecording}
-                    className="bg-gray-500 hover:bg-gray-600 text-white py-3 px-4 rounded-lg font-medium transition-colors"
-                  >
-                    ✕ 취소
-                  </button>
-                </div>
+              </>
+            ) : (
+              <div className="text-center text-gray-500 py-12">
+                <p className="text-sm mb-4">메모를 시작하려면 "새 메모" 버튼을 클릭하세요</p>
+                <p className="text-xs text-gray-400">
+                  • Enter 키를 누르면 문장 끝에 시간이 기록됩니다<br/>
+                  • 녹음 중이면 녹음 시간이 기록됩니다<br/>
+                  • 빈 줄에서는 시간이 기록되지 않습니다
+                </p>
               </div>
             )}
           </div>
+        </div>
 
-          {/* 파일 업로드 영역 */}
-          <div className="bg-white rounded-lg shadow p-6 mb-6">
-            {(isCompressing || compressionProgress) && (
-              <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <div className="flex items-center space-x-3">
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-                  <p className="text-blue-700 font-medium">{compressionProgress}</p>
-                </div>
-              </div>
-            )}
-
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              음성 파일 업로드 (여러 파일 가능)
-            </label>
-            <input
-              type="file"
-              accept="audio/*"
-              onChange={handleFileChange}
-              multiple
-              disabled={isCompressing || isTranscribing || isRecording}
-              className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 p-2.5 disabled:opacity-50"
-            />
-            <p className="mt-2 text-xs text-gray-500">
-              * 25MB 초과 파일은 자동으로 10분 단위로 분할됩니다
-            </p>
-
-            {/* 일괄 변환 버튼 */}
-            {selectedSessionIds.length > 0 && (
-              <div className="mt-4 p-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">
-                      {selectedSessionIds.length}개 파일 선택됨
-                    </p>
-                    <p className="text-xs text-gray-600 mt-1">
-                      선택한 파일들을 순차적으로 변환합니다
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleBatchTranscribe}
-                    disabled={isTranscribing || isCompressing}
-                    className="bg-gradient-to-r from-purple-600 to-blue-600 text-white py-2.5 px-6 rounded-lg font-medium hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md"
-                  >
-                    {isTranscribing ? '일괄 변환 중...' : '일괄 변환 시작'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* 선택된 파일 정보 */}
-          {selectedSession && (
-            <div className="bg-white rounded-lg shadow p-6 mb-6">
+        {/* 파일 정보 패널 (선택 시에만 오른쪽에 표시) */}
+        {selectedSession && (
+          <div className="w-96 bg-white border-l border-gray-200 shadow-lg overflow-y-auto p-6">
               {/* 변환 진행 상태 표시 */}
               {(isTranscribing || compressionProgress || selectedSession.status === 'transcribing') && (
                 <div className="mb-4 p-4 bg-blue-50 rounded-lg border-2 border-blue-300">
@@ -1669,121 +1700,7 @@ export default function Home() {
               )}
             </div>
           )}
-
-          {!selectedSession && sessions.length === 0 && (
-            <div className="text-center py-12">
-              <p className="text-gray-500">파일을 업로드해주세요</p>
-            </div>
-          )}
-          </div>
         </div>
-
-        {/* 메모 패널 */}
-        <div className={`${memoPanelOpen ? 'w-96' : 'w-0'} transition-all duration-300 bg-white shadow-lg overflow-hidden flex flex-col border-l border-gray-200`}>
-          <div className="p-4 border-b flex items-center justify-between">
-            <h2 className="text-lg font-bold text-gray-900">📝 메모장</h2>
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  if (selectedMemoId) {
-                    saveMemo();
-                  } else {
-                    createMemo();
-                  }
-                }}
-                className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-              >
-                {selectedMemoId ? '저장' : '새 메모'}
-              </button>
-              {selectedMemoId && (
-                <>
-                  <button
-                    onClick={downloadMemo}
-                    className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
-                  >
-                    다운로드
-                  </button>
-                  <button
-                    onClick={() => {
-                      setSelectedMemoId(null);
-                      setMemoContent('');
-                      setMemoTitle('');
-                    }}
-                    className="px-3 py-1 text-sm bg-gray-500 text-white rounded hover:bg-gray-600"
-                  >
-                    닫기
-                  </button>
-                </>
-              )}
-              <button
-                onClick={() => setMemoPanelOpen(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                ×
-              </button>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ minHeight: 'calc(100vh - 80px)' }}>
-            {selectedMemoId ? (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    제목
-                  </label>
-                  <input
-                    type="text"
-                    value={memoTitle}
-                    onChange={(e) => setMemoTitle(e.target.value)}
-                    onCompositionStart={handleCompositionStart}
-                    onCompositionEnd={handleCompositionEnd}
-                    spellCheck={false}
-                    autoComplete="off"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="메모 제목"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    내용 (Enter: 시간 기록, Shift+Enter: 줄바꿈)
-                  </label>
-                  <textarea
-                    ref={memoTextareaRef}
-                    value={memoContent}
-                    onChange={(e) => setMemoContent(e.target.value)}
-                    onKeyDown={handleMemoKeyDown}
-                    onCompositionStart={handleCompositionStart}
-                    onCompositionEnd={handleCompositionEnd}
-                    spellCheck={false}
-                    autoComplete="off"
-                    className="w-full h-full min-h-[600px] px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-mono text-sm"
-                    placeholder="메모를 입력하세요..."
-                  />
-                </div>
-              </>
-            ) : (
-              <div className="text-center text-gray-500 py-12">
-                <p className="text-sm mb-4">메모를 시작하려면 "새 메모" 버튼을 클릭하세요</p>
-                <p className="text-xs text-gray-400">
-                  • Enter 키를 누르면 문장 끝에 시간이 기록됩니다<br/>
-                  • 녹음 중이면 녹음 시간이 기록됩니다<br/>
-                  • 빈 줄에서는 시간이 기록되지 않습니다
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* 메모 패널 토글 버튼 */}
-        {!memoPanelOpen && (
-          <button
-            onClick={() => setMemoPanelOpen(true)}
-            className="fixed right-0 top-1/2 -translate-y-1/2 bg-white shadow-md p-2 rounded-l-lg hover:bg-gray-50 z-10 border border-gray-200"
-            title="메모장 열기"
-          >
-            📝
-          </button>
-        )}
       </div>
     </div>
   );
