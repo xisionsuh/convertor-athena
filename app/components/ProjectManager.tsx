@@ -211,13 +211,13 @@ export default function ProjectManager({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-gray-600">📁 프로젝트</h3>
+        <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400">📁 프로젝트</h3>
         <div className="flex gap-1">
           {selectedProjectId && (
             <button
               onClick={triggerFileUpload}
               disabled={isUploading}
-              className="text-xs text-green-600 hover:text-green-800 font-medium disabled:opacity-50"
+              className="text-xs text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-300 font-medium disabled:opacity-50"
               title="자료 업로드"
             >
               {isUploading ? '업로드 중...' : '📎 자료'}
@@ -225,7 +225,7 @@ export default function ProjectManager({
           )}
           <button
             onClick={() => setIsCreating(!isCreating)}
-            className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+            className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium"
           >
             {isCreating ? '취소' : '+ 새 프로젝트'}
           </button>
@@ -243,13 +243,13 @@ export default function ProjectManager({
       />
 
       {isCreating && (
-        <div className="p-2 bg-blue-50 rounded border border-blue-200 space-y-2">
+        <div className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded border border-blue-200 dark:border-blue-700 space-y-2">
           <input
             type="text"
             value={newProjectName}
             onChange={(e) => setNewProjectName(e.target.value)}
             placeholder="프로젝트 이름"
-            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 createProject();
@@ -264,7 +264,7 @@ export default function ProjectManager({
             value={newProjectDesc}
             onChange={(e) => setNewProjectDesc(e.target.value)}
             placeholder="설명 (선택사항)"
-            className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 createProject();
@@ -285,12 +285,12 @@ export default function ProjectManager({
         onClick={() => onSelectProject(null)}
         className={`p-2 rounded cursor-pointer transition-colors ${
           selectedProjectId === null
-            ? 'bg-blue-50 border-2 border-blue-500'
-            : 'bg-gray-50 hover:bg-gray-100 border-2 border-transparent'
+            ? 'bg-blue-50 dark:bg-blue-900/30 border-2 border-blue-500 dark:border-blue-400'
+            : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 border-2 border-transparent'
         }`}
       >
-        <p className="text-xs font-medium text-gray-900">전체</p>
-        <p className="text-xs text-gray-500">모든 파일 및 메모</p>
+        <p className="text-xs font-medium text-gray-900 dark:text-gray-100">전체</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400">모든 파일 및 메모</p>
       </div>
 
       {/* 프로젝트 목록 */}
@@ -299,15 +299,15 @@ export default function ProjectManager({
           <div
             className={`p-2 rounded cursor-pointer transition-colors ${
               selectedProjectId === project.id
-                ? 'bg-green-50 border-2 border-green-500'
-                : 'bg-gray-50 hover:bg-gray-100 border-2 border-transparent'
+                ? 'bg-green-50 dark:bg-green-900/30 border-2 border-green-500 dark:border-green-400'
+                : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 border-2 border-transparent'
             }`}
             onClick={() => onSelectProject(project.id)}
           >
             <div className="flex items-start justify-between">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1">
-                  <p className="text-xs font-medium text-gray-900 truncate" title={project.name}>
+                  <p className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate" title={project.name}>
                     {project.name}
                   </p>
                   <button
@@ -315,18 +315,18 @@ export default function ProjectManager({
                       e.stopPropagation();
                       toggleProjectExpansion(project.id);
                     }}
-                    className="text-gray-400 hover:text-gray-600 text-xs"
+                    className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-xs"
                     title="자료 목록 보기"
                   >
                     {expandedProjectId === project.id ? '▼' : '▶'}
                   </button>
                 </div>
                 {project.description && (
-                  <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1">
                     {project.description}
                   </p>
                 )}
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                   {new Date(project.updatedAt).toLocaleDateString('ko-KR')}
                 </p>
               </div>
@@ -337,7 +337,7 @@ export default function ProjectManager({
                       e.stopPropagation();
                       triggerFileUpload();
                     }}
-                    className="text-green-600 hover:text-green-800 text-sm"
+                    className="text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-300 text-sm"
                     title="자료 업로드"
                   >
                     📎
@@ -348,7 +348,7 @@ export default function ProjectManager({
                     e.stopPropagation();
                     deleteProject(project.id);
                   }}
-                  className="text-gray-400 hover:text-red-600 text-sm"
+                  className="text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 text-sm"
                   title="삭제"
                 >
                   ×
@@ -359,34 +359,34 @@ export default function ProjectManager({
           
           {/* 프로젝트 자료 목록 (확장 시 표시) */}
           {expandedProjectId === project.id && (
-            <div className="ml-4 mt-1 mb-2 pl-2 border-l-2 border-gray-200 space-y-1">
+            <div className="ml-4 mt-1 mb-2 pl-2 border-l-2 border-gray-200 dark:border-gray-600 space-y-1">
               {selectedProjectId === project.id && projectResources.length > 0 ? (
                 projectResources.map((resource) => (
                   <div
                     key={resource.id}
-                    className="p-1.5 bg-white rounded text-xs border border-gray-200 hover:bg-gray-50"
+                    className="p-1.5 bg-white dark:bg-gray-800 rounded text-xs border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1">
-                          <span className="text-gray-500">
+                          <span className="text-gray-500 dark:text-gray-400">
                             {resource.resource_type === 'file' && '📄'}
                             {resource.resource_type === 'memo' && '📝'}
                             {resource.resource_type === 'material' && '📎'}
                             {resource.resource_type === 'transcription' && '🎤'}
                             {resource.resource_type === 'minutes' && '📋'}
                           </span>
-                          <p className="text-gray-700 truncate" title={resource.title}>
+                          <p className="text-gray-700 dark:text-gray-300 truncate" title={resource.title}>
                             {resource.title}
                           </p>
                         </div>
                         {resource.metadata && (
-                          <p className="text-gray-400 text-xs mt-0.5">
+                          <p className="text-gray-400 dark:text-gray-500 text-xs mt-0.5">
                             {resource.metadata.fileSize && `${(resource.metadata.fileSize / 1024).toFixed(1)} KB`}
                             {resource.metadata.fileType && ` · ${resource.metadata.fileType}`}
                           </p>
                         )}
-                        <p className="text-gray-400 text-xs mt-0.5">
+                        <p className="text-gray-400 dark:text-gray-500 text-xs mt-0.5">
                           {new Date(resource.createdAt).toLocaleDateString('ko-KR')}
                         </p>
                       </div>
@@ -395,7 +395,7 @@ export default function ProjectManager({
                           e.stopPropagation();
                           deleteResource(resource.id, project.id);
                         }}
-                        className="text-gray-400 hover:text-red-600 text-xs ml-2"
+                        className="text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 text-xs ml-2"
                         title="삭제"
                       >
                         ×
@@ -404,9 +404,9 @@ export default function ProjectManager({
                   </div>
                 ))
               ) : selectedProjectId === project.id ? (
-                <p className="text-xs text-gray-400 py-1">자료가 없습니다</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 py-1">자료가 없습니다</p>
               ) : (
-                <p className="text-xs text-gray-400 py-1">프로젝트를 선택하면 자료를 볼 수 있습니다</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 py-1">프로젝트를 선택하면 자료를 볼 수 있습니다</p>
               )}
             </div>
           )}
@@ -414,7 +414,7 @@ export default function ProjectManager({
       ))}
 
       {projects.length === 0 && !isCreating && (
-        <p className="text-xs text-gray-400 text-center py-2">
+        <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-2">
           프로젝트가 없습니다
         </p>
       )}

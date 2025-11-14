@@ -6,6 +6,8 @@ import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import type { MemoSession } from './types';
 import AthenaCopilot from './components/AthenaCopilot';
 import ProjectManager from './components/ProjectManager';
+import ThemeToggle from './components/ThemeToggle';
+import { useTheme } from './contexts/ThemeContext';
 
 interface FileSession {
   id: string;
@@ -26,6 +28,7 @@ interface Toast {
 }
 
 export default function Home() {
+  const { theme } = useTheme(); // 테마 변경 시 리렌더링을 위해 추가
   const [sessions, setSessions] = useState<FileSession[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]); // 다중 선택
@@ -67,38 +70,56 @@ export default function Home() {
         const data = await response.json();
         
         if (data.authenticated && data.user) {
-          // 구글 로그인한 사용자
+          // 구글 로그인한 사용자 - 서버에서 가져온 userId 사용 (브라우저 무관)
           setUserId(data.user.id);
           setUserName(data.user.name || '');
           setIsAuthenticated(true);
+          // localStorage는 브라우저별이지만, 쿠키가 있으면 쿠키 우선 사용
+          // localStorage는 하위 호환성을 위해 저장만 함
           localStorage.setItem('athena-user-id', data.user.id);
           console.log('✅ 구글 로그인 사용자:', data.user.name, data.user.id);
         } else {
-          // 로그인하지 않은 경우 - 기존 로직 사용
-          let stored = localStorage.getItem('athena-user-id');
-          if (!stored) {
-            // DB에서 가장 최근에 사용된 userId 찾기
-            const latestResponse = await fetch('/api/sessions/latest-user');
-            if (latestResponse.ok) {
-              const latestData = await latestResponse.json();
-              if (latestData.success && latestData.userId) {
-                stored = latestData.userId;
-                console.log('기존 userId 발견:', stored);
-              } else {
-                stored = `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-              }
-            } else {
-              stored = `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+          // 로그인하지 않은 경우 - DB에서 가장 최근 userId 사용 (브라우저 무관)
+          const latestResponse = await fetch('/api/sessions/latest-user');
+          let stored: string | null = null;
+          
+          if (latestResponse.ok) {
+            const latestData = await latestResponse.json();
+            if (latestData.success && latestData.userId) {
+              stored = latestData.userId;
+              console.log('📦 DB에서 기존 userId 발견:', stored);
             }
-            localStorage.setItem('athena-user-id', stored);
           }
+          
+          // DB에 없으면 새로 생성 (이 경우에만 브라우저별로 다를 수 있음)
+          if (!stored) {
+            stored = `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            console.log('🆕 새 userId 생성:', stored);
+          }
+          
           setUserId(stored);
           setIsAuthenticated(false);
+          // localStorage는 하위 호환성을 위해 저장만 함
+          localStorage.setItem('athena-user-id', stored);
         }
       } catch (error) {
         console.error('인증 상태 확인 실패:', error);
-        // 실패 시 기본 userId 사용
-        const stored = localStorage.getItem('athena-user-id') || `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        // 실패 시 DB에서 최근 userId 찾기 시도
+        try {
+          const latestResponse = await fetch('/api/sessions/latest-user');
+          if (latestResponse.ok) {
+            const latestData = await latestResponse.json();
+            if (latestData.success && latestData.userId) {
+              setUserId(latestData.userId);
+              localStorage.setItem('athena-user-id', latestData.userId);
+              return;
+            }
+          }
+        } catch (e) {
+          console.error('최근 userId 조회 실패:', e);
+        }
+        // 모든 방법 실패 시 새로 생성
+        const stored = `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         localStorage.setItem('athena-user-id', stored);
         setUserId(stored);
       }
@@ -1457,7 +1478,7 @@ export default function Home() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-gray-100">
+    <div className="flex flex-col h-screen bg-gray-100 dark:bg-gray-900">
       {/* 토스트 알림 */}
       <div className="fixed top-4 right-4 z-50 space-y-2">
         {toasts.map(toast => (
@@ -1476,7 +1497,7 @@ export default function Home() {
 
       {/* 상단 녹음기 바 */}
       {isMounted && (
-        <div className="bg-white border-b border-gray-200 shadow-sm px-4 py-2 flex items-center justify-between">
+        <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm px-4 py-2 flex items-center justify-between">
           <div className="flex items-center gap-3 flex-1">
             {!isRecording ? (
               <>
@@ -1487,16 +1508,16 @@ export default function Home() {
                 >
                   <span className="text-sm">●</span> 녹음 시작
                 </button>
-                <span className="text-xs text-gray-500">음성 녹음 후 바로 텍스트로 변환할 수 있습니다</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">음성 녹음 후 바로 텍스트로 변환할 수 있습니다</span>
               </>
             ) : (
               <>
                 <div className="flex items-center gap-2">
                   <div className={`w-2 h-2 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-red-600 animate-pulse'}`}></div>
-                  <span className="text-sm font-mono font-medium text-gray-900">
+                  <span className="text-sm font-mono font-medium text-gray-900 dark:text-gray-100">
                     {formatRecordingTime(recordingTime)}
                   </span>
-                  {isPaused && <span className="text-xs text-yellow-600">일시정지</span>}
+                  {isPaused && <span className="text-xs text-yellow-600 dark:text-yellow-400">일시정지</span>}
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -1535,6 +1556,9 @@ export default function Home() {
               </>
             )}
           </div>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+          </div>
         </div>
       )}
 
@@ -1543,10 +1567,10 @@ export default function Home() {
 
       {/* 사이드바 */}
       {isMounted && (
-      <div className={`${sidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 bg-white shadow-lg overflow-hidden flex flex-col`}>
-        <div className="p-4 border-b space-y-3">
+      <div className={`${sidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 bg-white dark:bg-gray-800 shadow-lg overflow-hidden flex flex-col`}>
+        <div className="p-4 border-b dark:border-gray-700 space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-gray-900">파일 목록</h2>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">파일 목록</h2>
             <div className="flex gap-2">
               {isMounted && (
                 <button
@@ -1586,7 +1610,7 @@ export default function Home() {
           </div>
           
           {/* 구글 로그인/로그아웃 버튼 */}
-          <div className="mb-3 pb-3 border-b border-gray-200">
+          <div className="mb-3 pb-3 border-b border-gray-200 dark:border-gray-700">
             {isAuthenticated ? (
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -1594,8 +1618,8 @@ export default function Home() {
                     {userName ? userName.charAt(0).toUpperCase() : 'U'}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-gray-900 truncate">{userName || '사용자'}</p>
-                    <p className="text-xs text-gray-500">구글 로그인</p>
+                    <p className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate">{userName || '사용자'}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">구글 로그인</p>
                   </div>
                 </div>
                 <button
@@ -1635,7 +1659,7 @@ export default function Home() {
                 onCompositionEnd={handleCompositionEnd}
                 spellCheck={false}
                 autoComplete="off"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
               />
               {searchQuery && (
                 <button
@@ -1651,18 +1675,18 @@ export default function Home() {
           {/* 정렬 옵션 */}
           {isMounted && sessions.length > 0 && (
             <div className="flex items-center gap-2 text-xs">
-              <span className="text-gray-600">정렬:</span>
+              <span className="text-gray-600 dark:text-gray-400">정렬:</span>
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as 'date' | 'name')}
-                className="px-2 py-1 border border-gray-300 rounded text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
                 <option value="date">날짜</option>
                 <option value="name">이름</option>
               </select>
               <button
                 onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-                className="px-2 py-1 border border-gray-300 rounded hover:bg-gray-50"
+                className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300"
                 title={sortOrder === 'asc' ? '오름차순' : '내림차순'}
               >
                 {sortOrder === 'asc' ? '↑' : '↓'}
@@ -1671,7 +1695,7 @@ export default function Home() {
           )}
           
           {isMounted && (
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
               {filteredAndSortedSessions.length}개 파일
               {filteredAndSortedMemos.length > 0 && ` · ${filteredAndSortedMemos.length}개 메모`}
               {searchQuery && filteredAndSortedSessions.length !== sessions.length && ` (전체 ${sessions.length}개 중)`}
@@ -1702,8 +1726,8 @@ export default function Home() {
               key={session.id}
               className={`p-3 rounded-lg transition-colors ${
                 selectedSessionId === session.id
-                  ? 'bg-blue-50 border-2 border-blue-500'
-                  : 'bg-gray-50 hover:bg-gray-100 border-2 border-transparent'
+                  ? 'bg-blue-50 dark:bg-blue-900/30 border-2 border-blue-500 dark:border-blue-400'
+                  : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 border-2 border-transparent'
               }`}
             >
               <div className="flex items-start gap-2">
@@ -1726,20 +1750,20 @@ export default function Home() {
                   className="flex-1 min-w-0 cursor-pointer"
                   onClick={() => setSelectedSessionId(session.id)}
                 >
-                  <p className="text-sm font-medium text-gray-900 truncate" title={session.fileName}>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate" title={session.fileName}>
                     {session.fileName}
                   </p>
                   <div className="flex items-center gap-2 mt-1">
                     {session.file && (
-                      <span className="text-xs text-gray-500">
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
                         {(session.file.size / 1024 / 1024).toFixed(1)}MB
                       </span>
                     )}
                     <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                      session.status === 'completed' ? 'bg-green-100 text-green-700' :
-                      session.status === 'transcribing' ? 'bg-blue-100 text-blue-700' :
-                      session.status === 'error' ? 'bg-red-100 text-red-700' :
-                      'bg-gray-100 text-gray-600'
+                      session.status === 'completed' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
+                      session.status === 'transcribing' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' :
+                      session.status === 'error' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
+                      'bg-gray-100 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
                     }`}>
                       {session.status === 'completed' ? '✓' :
                        session.status === 'transcribing' ? '...' :
@@ -1809,8 +1833,8 @@ export default function Home() {
                   key={memo.id}
                   className={`p-3 rounded-lg transition-colors mb-2 ${
                     selectedMemoId === memo.id
-                      ? 'bg-green-50 border-2 border-green-500'
-                      : 'bg-gray-50 hover:bg-gray-100 border-2 border-transparent'
+                      ? 'bg-green-50 dark:bg-green-900/30 border-2 border-green-500 dark:border-green-400'
+                      : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 border-2 border-transparent'
                   }`}
                 >
                   <div className="flex items-start gap-2">
@@ -1822,13 +1846,13 @@ export default function Home() {
                         setMemoPanelOpen(true);
                       }}
                     >
-                      <p className="text-sm font-medium text-gray-900 truncate" title={memo.title}>
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate" title={memo.title}>
                         {memo.title}
                       </p>
-                      <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
                         {memo.content.substring(0, 50)}{memo.content.length > 50 ? '...' : ''}
                       </p>
-                      <p className="text-xs text-gray-400 mt-1">
+                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                         {memo.updatedAt.toLocaleDateString('ko-KR')}
                       </p>
                     </div>
@@ -1864,7 +1888,7 @@ export default function Home() {
 
           {/* 빈 상태 메시지 */}
           {filteredAndSortedSessions.length === 0 && filteredAndSortedMemos.length === 0 && (
-            <div className="text-center text-gray-500 py-8">
+            <div className="text-center text-gray-500 dark:text-gray-400 py-8">
               <p className="text-sm">
                 {searchQuery ? '검색 결과가 없습니다' : '업로드된 파일이 없습니다'}
               </p>
@@ -1886,7 +1910,7 @@ export default function Home() {
       {isMounted && (
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
-        className="absolute left-0 top-1/2 -translate-y-1/2 bg-white shadow-md p-2 rounded-r-lg hover:bg-gray-50 z-10"
+        className="absolute left-0 top-1/2 -translate-y-1/2 bg-white dark:bg-gray-800 shadow-md p-2 rounded-r-lg hover:bg-gray-50 dark:hover:bg-gray-700 z-10 text-gray-900 dark:text-gray-100"
         style={{ left: sidebarOpen ? '320px' : '0px', transition: 'left 0.3s' }}
       >
         {sidebarOpen ? '◀' : '▶'}
@@ -1924,9 +1948,9 @@ export default function Home() {
           />
 
           {/* 메모 패널 - 우측에 고정 */}
-          <div className={`${memoPanelOpen ? 'w-96' : 'w-0'} transition-all duration-300 bg-white border-l border-gray-200 shadow-lg overflow-hidden flex flex-col flex-shrink-0`}>
-          <div className="p-4 border-b flex items-center justify-between">
-            <h2 className="text-lg font-bold text-gray-900">📝 메모장</h2>
+          <div className={`${memoPanelOpen ? 'w-96' : 'w-0'} transition-all duration-300 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 shadow-lg overflow-hidden flex flex-col flex-shrink-0`}>
+          <div className="p-4 border-b dark:border-gray-700 flex items-center justify-between">
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">📝 메모장</h2>
             <div className="flex gap-2">
                 <button
                 onClick={() => {
@@ -1984,7 +2008,7 @@ export default function Home() {
                     onCompositionEnd={handleCompositionEnd}
                     spellCheck={false}
                     autoComplete="off"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                     placeholder="메모 제목"
                   />
                 </div>
@@ -2001,15 +2025,15 @@ export default function Home() {
                     onCompositionEnd={handleCompositionEnd}
                     spellCheck={false}
                     autoComplete="off"
-                    className="w-full h-full min-h-[600px] px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-mono text-sm"
+                    className="w-full h-full min-h-[600px] px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-mono text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                     placeholder="메모를 입력하세요..."
                   />
                 </div>
               </>
             ) : (
-              <div className="text-center text-gray-500 py-12">
+              <div className="text-center text-gray-500 dark:text-gray-400 py-12">
                 <p className="text-sm mb-4">메모를 시작하려면 "새 메모" 버튼을 클릭하세요</p>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-gray-400 dark:text-gray-500">
                   • Enter 키를 누르면 문장 끝에 시간이 기록됩니다<br/>
                   • 녹음 중이면 녹음 시간이 기록됩니다<br/>
                   • 빈 줄에서는 시간이 기록되지 않습니다
@@ -2021,10 +2045,10 @@ export default function Home() {
 
           {/* 파일 정보 패널 (선택 시에만 오른쪽에 표시) */}
           {selectedSession && (
-            <div className="flex-1 flex flex-col bg-white border-l border-gray-200">
+            <div className="flex-1 flex flex-col bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700">
               {/* 파일 정보 패널 헤더 */}
-              <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-gray-900">파일 정보</h2>
+              <div className="p-4 border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">파일 정보</h2>
                 <button
                   onClick={() => setSelectedSessionId(null)}
                   className="text-gray-400 hover:text-gray-600 text-xl leading-none px-2 py-1"
@@ -2052,9 +2076,9 @@ export default function Home() {
             )}
 
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-900">{selectedSession.fileName}</h2>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">{selectedSession.fileName}</h2>
                 <div className="flex items-center gap-3">
-                <span className="text-sm text-gray-500">
+                <span className="text-sm text-gray-500 dark:text-gray-400">
                   {selectedSession.file ? `${(selectedSession.file.size / 1024 / 1024).toFixed(2)}MB` : '파일 정보 없음'}
                 </span>
                   {selectedSession.status === 'transcribing' && (
@@ -2072,8 +2096,8 @@ export default function Home() {
 
               {/* 오디오 플레이어 */}
               {selectedSession.file && (
-                <div className="mb-4 p-4 bg-gray-50 rounded-lg">
-                  <p className="text-sm font-medium text-gray-700 mb-2">🎵 녹음 파일 재생</p>
+                <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">🎵 녹음 파일 재생</p>
                   <audio
                     controls
                     className="w-full"
@@ -2103,7 +2127,7 @@ export default function Home() {
               {selectedSession.transcription && (
                 <div className="mb-6">
                   <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-lg font-semibold text-gray-900">변환된 텍스트</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">변환된 텍스트</h3>
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleCopy('transcription')}
@@ -2119,8 +2143,8 @@ export default function Home() {
                       </button>
                     </div>
                   </div>
-                  <div className="bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto">
-                    <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                  <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 max-h-96 overflow-y-auto">
+                    <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
                       {selectedSession.transcription}
                     </p>
                   </div>
@@ -2131,7 +2155,7 @@ export default function Home() {
               {selectedSession.minutes && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-lg font-semibold text-gray-900">회의록</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">회의록</h3>
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleCopy('minutes')}
@@ -2147,8 +2171,8 @@ export default function Home() {
                       </button>
                     </div>
                   </div>
-                  <div className="bg-gray-50 rounded-lg p-4 max-h-[600px] overflow-y-auto">
-                    <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap">
+                  <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 max-h-[600px] overflow-y-auto">
+                    <div className="prose prose-sm max-w-none text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
                       {selectedSession.minutes}
                     </div>
                   </div>

@@ -59,6 +59,9 @@ export default function AthenaCopilot({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isSendingRef = useRef(false); // 중복 호출 방지
+  const lastSentMessageRef = useRef<string>(''); // 마지막 전송된 메시지 추적
+  const lastSentTimeRef = useRef<number>(0); // 마지막 전송 시간 추적
+  const isComposingRef = useRef(false); // 한글 입력 중인지 추적
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
 
   // 세션 ID 초기화
@@ -107,19 +110,39 @@ export default function AthenaCopilot({
   };
 
   const handleSend = async () => {
-    // 중복 호출 방지
-    if (!input.trim() || isLoading || !sessionId || isSendingRef.current) return;
+    const messageContent = input.trim();
     
+    // 중복 호출 방지 - 여러 조건 확인
+    const now = Date.now();
+    const isDuplicate = 
+      !messageContent || 
+      isLoading || 
+      !sessionId || 
+      isSendingRef.current ||
+      (messageContent === lastSentMessageRef.current && now - lastSentTimeRef.current < 2000); // 2초 내 동일 메시지 중복 방지
+    
+    if (isDuplicate) {
+      console.log('메시지 전송 중복 방지:', { 
+        messageContent, 
+        isLoading, 
+        isSending: isSendingRef.current,
+        isDuplicateMessage: messageContent === lastSentMessageRef.current,
+        timeSinceLastSend: now - lastSentTimeRef.current
+      });
+      return;
+    }
+    
+    // 전송 상태 업데이트
     isSendingRef.current = true;
+    lastSentMessageRef.current = messageContent;
+    lastSentTimeRef.current = now;
 
     const userMessage: Message = {
       id: generateUniqueId(),
       role: 'user',
-      content: input.trim(),
+      content: messageContent,
       timestamp: new Date(),
     };
-
-    const messageContent = input.trim();
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
@@ -280,12 +303,6 @@ export default function AthenaCopilot({
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !isLoading && !isSendingRef.current) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -312,9 +329,9 @@ export default function AthenaCopilot({
         </button>
       )}
       
-      <div className={`${isOpen ? 'flex-1' : 'w-0'} transition-all duration-300 bg-white shadow-lg overflow-hidden flex flex-col`}>
+      <div className={`${isOpen ? 'flex-1' : 'w-0'} transition-all duration-300 bg-white dark:bg-gray-800 shadow-lg overflow-hidden flex flex-col`}>
         {/* 헤더 */}
-        <div className="p-4 border-b bg-gradient-to-r from-purple-600 to-blue-600 text-white">
+        <div className="p-4 border-b dark:border-gray-700 bg-gradient-to-r from-purple-600 to-blue-600 text-white">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
@@ -340,10 +357,10 @@ export default function AthenaCopilot({
           {/* 메시지 영역 */}
           <div className="flex-1 overflow-y-auto">
             {messages.length === 0 && (
-              <div className="text-center text-gray-500 py-8 px-4">
+              <div className="text-center text-gray-500 dark:text-gray-400 py-8 px-4">
                 <div className="text-4xl mb-4">🧠</div>
                 <p className="text-sm font-medium mb-2">Athena AI 코파일럿</p>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-gray-400 dark:text-gray-500">
                   앱을 제어하고 질문에 답변할 수 있습니다.
                   <br />
                   예: "첫 번째 파일을 변환해줘"
@@ -375,7 +392,7 @@ export default function AthenaCopilot({
                 return (
                   <div
                     key={message.id}
-                    className="w-full bg-gradient-to-b from-gray-50 to-white border-t border-b border-gray-200"
+                    className="w-full bg-gradient-to-b from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 border-t border-b border-gray-200 dark:border-gray-700"
                   >
                     <div className="px-6 py-6 max-w-none">
                       <div className="flex items-start gap-3 mb-3">
@@ -383,13 +400,13 @@ export default function AthenaCopilot({
                           <span className="text-white text-sm">🧠</span>
                         </div>
                         <div className="flex-1">
-                          <div className="text-xs text-gray-500 mb-2">
+                          <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">
                             Athena AI · {message.timestamp.toLocaleTimeString('ko-KR', { 
                               hour: '2-digit', 
                               minute: '2-digit' 
                             })}
                           </div>
-                          <div className="prose prose-sm max-w-none prose-headings:text-gray-900 prose-p:text-gray-900 prose-strong:text-gray-900 prose-code:text-gray-900 prose-pre:bg-gray-900 prose-pre:text-gray-100">
+                          <div className="prose prose-sm max-w-none prose-headings:text-gray-900 dark:prose-headings:text-gray-100 prose-p:text-gray-900 dark:prose-p:text-gray-100 prose-strong:text-gray-900 dark:prose-strong:text-gray-100 prose-code:text-gray-900 dark:prose-code:text-gray-100 prose-pre:bg-gray-900 dark:prose-pre:bg-gray-800 prose-pre:text-gray-100">
                             <ReactMarkdown
                               remarkPlugins={[remarkMath]}
                               rehypePlugins={[rehypeKatex]}
@@ -412,30 +429,30 @@ export default function AthenaCopilot({
                                     </code>
                                   );
                                 },
-                                p: ({ children }: any) => <p className="mb-4 last:mb-0">{children}</p>,
-                                h1: ({ children }: any) => <h1 className="text-2xl font-bold mb-4 mt-6 first:mt-0">{children}</h1>,
-                                h2: ({ children }: any) => <h2 className="text-xl font-bold mb-3 mt-5 first:mt-0">{children}</h2>,
-                                h3: ({ children }: any) => <h3 className="text-lg font-semibold mb-2 mt-4 first:mt-0">{children}</h3>,
+                                p: ({ children }: any) => <p className="mb-4 last:mb-0 text-gray-900 dark:text-gray-100">{children}</p>,
+                                h1: ({ children }: any) => <h1 className="text-2xl font-bold mb-4 mt-6 first:mt-0 text-gray-900 dark:text-gray-100">{children}</h1>,
+                                h2: ({ children }: any) => <h2 className="text-xl font-bold mb-3 mt-5 first:mt-0 text-gray-900 dark:text-gray-100">{children}</h2>,
+                                h3: ({ children }: any) => <h3 className="text-lg font-semibold mb-2 mt-4 first:mt-0 text-gray-900 dark:text-gray-100">{children}</h3>,
                                 ul: ({ children }: any) => <ul className="list-disc list-inside mb-4 space-y-1">{children}</ul>,
                                 ol: ({ children }: any) => <ol className="list-decimal list-inside mb-4 space-y-1">{children}</ol>,
                                 li: ({ children }: any) => <li className="ml-4">{children}</li>,
                                 blockquote: ({ children }: any) => (
-                                  <blockquote className="border-l-4 border-gray-300 pl-4 italic my-4 text-gray-700">
+                                  <blockquote className="border-l-4 border-gray-300 dark:border-gray-600 pl-4 italic my-4 text-gray-700 dark:text-gray-300">
                                     {children}
                                   </blockquote>
                                 ),
                                 table: ({ children }: any) => (
                                   <div className="overflow-x-auto my-4">
-                                    <table className="min-w-full border-collapse border border-gray-300">
+                                    <table className="min-w-full border-collapse border border-gray-300 dark:border-gray-600">
                                       {children}
                                     </table>
                                   </div>
                                 ),
-                                thead: ({ children }: any) => <thead className="bg-gray-100">{children}</thead>,
+                                thead: ({ children }: any) => <thead className="bg-gray-100 dark:bg-gray-700">{children}</thead>,
                                 tbody: ({ children }: any) => <tbody>{children}</tbody>,
-                                tr: ({ children }: any) => <tr className="border-b border-gray-200">{children}</tr>,
-                                td: ({ children }: any) => <td className="border border-gray-300 px-4 py-2">{children}</td>,
-                                th: ({ children }: any) => <th className="border border-gray-300 px-4 py-2 font-semibold">{children}</th>,
+                                tr: ({ children }: any) => <tr className="border-b border-gray-200 dark:border-gray-600">{children}</tr>,
+                                td: ({ children }: any) => <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-gray-900 dark:text-gray-100">{children}</td>,
+                                th: ({ children }: any) => <th className="border border-gray-300 dark:border-gray-600 px-4 py-2 font-semibold text-gray-900 dark:text-gray-100">{children}</th>,
                               }}
                             >
                               {message.content}
@@ -450,16 +467,16 @@ export default function AthenaCopilot({
             })}
             
             {isLoading && (
-              <div className="w-full bg-gradient-to-b from-gray-50 to-white border-t border-b border-gray-200">
+              <div className="w-full bg-gradient-to-b from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 border-t border-b border-gray-200 dark:border-gray-700">
                 <div className="px-6 py-6">
                   <div className="flex items-start gap-3">
                     <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
                       <span className="text-white text-sm">🧠</span>
                     </div>
                     <div className="flex items-center gap-2 pt-2">
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+                      <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                      <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
                     </div>
                   </div>
                 </div>
@@ -470,16 +487,16 @@ export default function AthenaCopilot({
           </div>
 
           {/* 입력 영역 - 이미지 스타일 */}
-          <div className="p-3 border-t bg-gray-100">
+          <div className="p-3 border-t dark:border-gray-700 bg-gray-100 dark:bg-gray-900">
             {/* 선택된 파일 표시 */}
             {selectedFiles.length > 0 && (
               <div className="mb-2 space-y-1">
                 {selectedFiles.map((file, index) => (
-                  <div key={index} className="flex items-center gap-2 text-xs bg-blue-50 px-2 py-1 rounded">
-                    <span className="flex-1 truncate">📎 {file.name}</span>
+                  <div key={index} className="flex items-center gap-2 text-xs bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded">
+                    <span className="flex-1 truncate text-gray-900 dark:text-gray-100">📎 {file.name}</span>
                     <button
                       onClick={() => removeFile(index)}
-                      className="text-red-600 hover:text-red-800"
+                      className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
                     >
                       ×
                     </button>
@@ -489,27 +506,27 @@ export default function AthenaCopilot({
             )}
             
             {/* 입력 바 - 이미지와 동일한 스타일 */}
-            <div className="flex items-center gap-2 bg-gray-200 rounded-lg px-2 py-2">
+            <div className="flex items-center gap-2 bg-gray-200 dark:bg-gray-700 rounded-lg px-2 py-2">
               {/* 왼쪽 버튼들 */}
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isLoading}
-                  className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-gray-50 transition-colors text-gray-700 text-sm font-bold"
+                  className="w-8 h-8 rounded-full bg-white dark:bg-gray-600 flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-500 transition-colors text-gray-700 dark:text-gray-200 text-sm font-bold"
                   title="파일 첨부"
                 >
                   +
                 </button>
                 <button
                   disabled={isLoading}
-                  className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-gray-50 transition-colors text-gray-700"
+                  className="w-8 h-8 rounded-full bg-white dark:bg-gray-600 flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-500 transition-colors text-gray-700 dark:text-gray-200"
                   title="웹 검색"
                 >
                   🌐
                 </button>
                 <button
                   disabled={isLoading}
-                  className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-gray-50 transition-colors text-gray-700 text-xs font-bold"
+                  className="w-8 h-8 rounded-full bg-white dark:bg-gray-600 flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-500 transition-colors text-gray-700 dark:text-gray-200 text-xs font-bold"
                   title="텍스트 서식"
                 >
                   A
@@ -517,20 +534,39 @@ export default function AthenaCopilot({
               </div>
               
               {/* 중앙 입력 영역 */}
-              <div className="flex-1 bg-gray-300 rounded px-3 py-1.5">
+              <div className="flex-1 bg-gray-300 dark:bg-gray-600 rounded px-3 py-1.5">
                 <input
                   ref={inputRef}
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
+                  onCompositionStart={() => {
+                    // 한글 입력 시작
+                    isComposingRef.current = true;
+                  }}
+                  onCompositionEnd={() => {
+                    // 한글 입력 완료
+                    isComposingRef.current = false;
+                  }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey && !isLoading && !isSendingRef.current) {
+                    // 한글 입력 중이면 Enter 키 무시
+                    if (isComposingRef.current) {
+                      return;
+                    }
+                    
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      // 중복 방지: 이미 전송 중이거나 입력이 비어있으면 무시
+                      if (isLoading || isSendingRef.current || !input.trim()) {
+                        e.preventDefault();
+                        return;
+                      }
                       e.preventDefault();
+                      e.stopPropagation(); // 이벤트 버블링 방지
                       handleSend();
                     }
                   }}
                   placeholder="메시지를 입력하세요..."
-                  className="w-full bg-transparent border-0 outline-0 text-sm text-gray-800 placeholder-gray-500"
+                  className="w-full bg-transparent border-0 outline-0 text-sm text-gray-800 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"
                   disabled={isLoading}
                 />
               </div>
@@ -539,7 +575,7 @@ export default function AthenaCopilot({
               <div className="flex items-center gap-1">
                 <button
                   disabled={isLoading}
-                  className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-gray-50 transition-colors text-gray-700"
+                  className="w-8 h-8 rounded-full bg-white dark:bg-gray-600 flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-500 transition-colors text-gray-700 dark:text-gray-200"
                   title="음성 입력"
                 >
                   🎤
@@ -547,7 +583,7 @@ export default function AthenaCopilot({
                 <button
                   onClick={handleSend}
                   disabled={!input.trim() || isLoading || isSendingRef.current}
-                  className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-gray-50 transition-colors text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-8 h-8 rounded-full bg-white dark:bg-gray-600 flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-500 transition-colors text-gray-700 dark:text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
                   title="전송"
                 >
                   🎶
