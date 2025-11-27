@@ -15,6 +15,10 @@ import { createOCRTool } from './tools/ocr.js';
 import { createGoogleCalendarTools } from './tools/googleCalendar.js';
 import { createTranslatorTools } from './tools/translator.js';
 import { createGitHubTools } from './tools/github.js';
+import { createImageGeneratorTools } from './tools/imageGenerator.js';
+import { createTextToSpeechTools } from './tools/textToSpeech.js';
+import { createNotificationTools } from './tools/notifications.js';
+import { createAnalyticsTools } from './tools/analytics.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -128,6 +132,54 @@ export class MCPManager extends MCPBase {
         });
       } catch (error) {
         logger.warn('GitHub tools not available', { error: error.message });
+      }
+
+      // 이미지 생성 도구 등록 (DALL-E)
+      try {
+        const imageGeneratorTools = createImageGeneratorTools({
+          workspaceRoot: this.workspaceRoot
+        });
+        imageGeneratorTools.forEach(tool => {
+          this.registerTool(tool);
+        });
+      } catch (error) {
+        logger.warn('Image generator tools not available', { error: error.message });
+      }
+
+      // TTS 도구 등록
+      try {
+        const ttsTools = createTextToSpeechTools({
+          workspaceRoot: this.workspaceRoot
+        });
+        ttsTools.forEach(tool => {
+          this.registerTool(tool);
+        });
+      } catch (error) {
+        logger.warn('TTS tools not available', { error: error.message });
+      }
+
+      // 알림 도구 등록
+      try {
+        const notificationTools = createNotificationTools({
+          dbPath: this.dbPath
+        });
+        notificationTools.forEach(tool => {
+          this.registerTool(tool);
+        });
+      } catch (error) {
+        logger.warn('Notification tools not available', { error: error.message });
+      }
+
+      // 분석 도구 등록
+      try {
+        const analyticsTools = createAnalyticsTools({
+          dbPath: this.dbPath
+        });
+        analyticsTools.forEach(tool => {
+          this.registerTool(tool);
+        });
+      } catch (error) {
+        logger.warn('Analytics tools not available', { error: error.message });
       }
 
       logger.info('MCP tools initialized', {
