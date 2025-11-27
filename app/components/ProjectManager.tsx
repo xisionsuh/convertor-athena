@@ -311,18 +311,23 @@ export default function ProjectManager({
   };
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400">📁 프로젝트</h3>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between px-1">
+        <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Projects</h3>
         <button
           onClick={() => setIsCreating(!isCreating)}
-          className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium"
+          className="text-xs text-primary hover:text-primary/80 font-medium transition-colors flex items-center gap-1"
         >
-          {isCreating ? '취소' : '+ 새 프로젝트'}
+          {isCreating ? 'Cancel' : (
+            <>
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
+              New
+            </>
+          )}
         </button>
       </div>
 
-      {/* 숨겨진 파일 입력 */}
+      {/* Hidden File Input */}
       <input
         ref={fileInputRef}
         type="file"
@@ -333,13 +338,13 @@ export default function ProjectManager({
       />
 
       {isCreating && (
-        <div className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded border border-blue-200 dark:border-blue-700 space-y-2">
+        <div className="p-3 bg-card rounded-lg border border-border shadow-sm space-y-3 animate-fade-in">
           <input
             type="text"
             value={newProjectName}
             onChange={(e) => setNewProjectName(e.target.value)}
-            placeholder="프로젝트 이름"
-            className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+            placeholder="Project Name"
+            className="w-full px-3 py-1.5 text-sm bg-muted/50 border border-transparent focus:bg-background focus:border-primary/50 rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 createProject();
@@ -353,8 +358,8 @@ export default function ProjectManager({
             type="text"
             value={newProjectDesc}
             onChange={(e) => setNewProjectDesc(e.target.value)}
-            placeholder="설명 (선택사항)"
-            className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+            placeholder="Description (optional)"
+            className="w-full px-3 py-1.5 text-sm bg-muted/50 border border-transparent focus:bg-background focus:border-primary/50 rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 createProject();
@@ -363,179 +368,164 @@ export default function ProjectManager({
           />
           <button
             onClick={createProject}
-            className="w-full px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+            className="w-full px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors shadow-sm"
           >
-            생성
+            Create Project
           </button>
         </div>
       )}
 
-      {/* 전체 보기 옵션 */}
+      {/* All Projects Option */}
       <div
         onClick={() => onSelectProject(null)}
-        className={`p-2 rounded cursor-pointer transition-colors ${
-          selectedProjectId === null
-            ? 'bg-blue-50 dark:bg-blue-900/30 border-2 border-blue-500 dark:border-blue-400'
-            : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 border-2 border-transparent'
-        }`}
+        className={`group p-3 rounded-lg cursor-pointer transition-all border ${selectedProjectId === null
+            ? 'bg-primary/5 border-primary/20 shadow-sm'
+            : 'bg-transparent border-transparent hover:bg-muted/50 hover:border-border/50'
+          }`}
       >
-        <p className="text-xs font-medium text-gray-900 dark:text-gray-100">📂 전체 보기</p>
-        <p className="text-xs text-gray-500 dark:text-gray-400">모든 파일 및 메모</p>
+        <div className="flex items-center gap-3">
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${selectedProjectId === null ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground group-hover:text-foreground'}`}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+          </div>
+          <div>
+            <p className={`text-sm font-medium ${selectedProjectId === null ? 'text-primary' : 'text-foreground'}`}>All Files</p>
+            <p className="text-xs text-muted-foreground">View everything</p>
+          </div>
+        </div>
       </div>
 
-      {/* 프로젝트 목록 */}
-      {projects.map((project) => {
-        const isExpanded = expandedProjects.has(project.id);
-        const resources = projectResources[project.id] || [];
+      {/* Project List */}
+      <div className="space-y-1">
+        {projects.map((project) => {
+          const isExpanded = expandedProjects.has(project.id);
+          const resources = projectResources[project.id] || [];
 
-        return (
-        <div key={project.id} className="space-y-1">
-          {/* 프로젝트 헤더 */}
-          <div
-            onDragOver={(e) => handleDragOver(e, project.id)}
-            onDragLeave={handleDragLeave}
-            onDrop={(e) => handleDrop(e, project.id)}
-            onClick={() => {
-              toggleProject(project.id);
-              onSelectProject(project.id);
-            }}
-            className={`p-2 rounded cursor-pointer transition-all ${
-              dragOverProjectId === project.id
-                ? 'bg-green-100 dark:bg-green-900/50 border-2 border-dashed border-green-500 dark:border-green-400 scale-[1.02] shadow-lg'
-                : selectedProjectId === project.id
-                ? 'bg-green-50 dark:bg-green-900/30 border-2 border-green-500 dark:border-green-400'
-                : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 border-2 border-transparent'
-            }`}
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className={`text-xs transition-transform ${isExpanded ? 'rotate-90' : ''}`}>▶</span>
-                  <span className="text-sm">📁</span>
-                  <p className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate" title={project.name}>
-                    {project.name}
-                  </p>
-                  {/* 자료 개수 뱃지 */}
-                  {(resourceCounts[project.id] || 0) > 0 && (
-                    <span className="px-1.5 py-0.5 text-xs font-medium bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300 rounded-full">
-                      {resourceCounts[project.id]}
-                    </span>
-                  )}
-                </div>
-                {project.description && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1 ml-7">
-                    {project.description}
-                  </p>
-                )}
-                {dragOverProjectId === project.id && (
-                  <p className="text-xs text-green-600 dark:text-green-400 font-medium mt-1 ml-7 animate-pulse">
-                    ↓ 여기에 놓으세요!
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    triggerFileUpload(project.id);
-                  }}
-                  disabled={isUploading}
-                  className="text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-300 text-sm p-1 hover:bg-green-100 dark:hover:bg-green-900/30 rounded disabled:opacity-50"
-                  title="자료 업로드"
-                >
-                  {isUploading && uploadTargetProjectId === project.id ? '⏳' : '📎'}
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteProject(project.id);
-                  }}
-                  className="text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 text-sm p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded"
-                  title="프로젝트 삭제"
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-          </div>
+          return (
+            <div key={project.id} className="group/project">
+              {/* Project Header */}
+              <div
+                onDragOver={(e) => handleDragOver(e, project.id)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, project.id)}
+                onClick={() => {
+                  toggleProject(project.id);
+                  onSelectProject(project.id);
+                }}
+                className={`relative p-2 rounded-lg cursor-pointer transition-all border ${dragOverProjectId === project.id
+                    ? 'bg-primary/10 border-primary border-dashed scale-[1.02] shadow-md z-10'
+                    : selectedProjectId === project.id
+                      ? 'bg-primary/5 border-primary/20 shadow-sm'
+                      : 'bg-transparent border-transparent hover:bg-muted/50 hover:border-border/50'
+                  }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`mt-0.5 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''} text-muted-foreground`}>
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
+                  </div>
 
-          {/* 프로젝트 자료 목록 (토글로 펼치기/접기) */}
-          {isExpanded && (
-            <div className="ml-3 pl-3 border-l-2 border-green-300 dark:border-green-700 space-y-1">
-              {resources.length > 0 ? (
-                <>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 font-medium py-1">
-                    프로젝트 자료 ({resources.length}개)
-                  </p>
-                  {resources.map((resource) => (
-                    <div
-                      key={resource.id}
-                      className="group p-2 bg-white dark:bg-gray-800 rounded text-xs border border-gray-200 dark:border-gray-700 hover:border-green-300 dark:hover:border-green-600 transition-colors"
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className={`text-sm font-medium truncate ${selectedProjectId === project.id ? 'text-primary' : 'text-foreground'}`} title={project.name}>
+                        {project.name}
+                      </p>
+                      {(resourceCounts[project.id] || 0) > 0 && (
+                        <span className="px-1.5 py-0.5 text-[10px] font-medium bg-muted text-muted-foreground rounded-full">
+                          {resourceCounts[project.id]}
+                        </span>
+                      )}
+                    </div>
+                    {project.description && (
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
+                        {project.description}
+                      </p>
+                    )}
+                    {dragOverProjectId === project.id && (
+                      <p className="text-xs text-primary font-medium mt-1 animate-pulse">
+                        Drop to add files
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1 opacity-0 group-hover/project:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        triggerFileUpload(project.id);
+                      }}
+                      disabled={isUploading}
+                      className="p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded transition-colors"
+                      title="Upload File"
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-start gap-2 flex-1 min-w-0">
-                          <span className="text-sm flex-shrink-0">
+                      {isUploading && uploadTargetProjectId === project.id ? (
+                        <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                      ) : (
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
+                      )}
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteProject(project.id);
+                      }}
+                      className="p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded transition-colors"
+                      title="Delete Project"
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Project Resources */}
+              {isExpanded && (
+                <div className="ml-4 pl-4 border-l border-border/50 space-y-0.5 mt-1">
+                  {resources.length > 0 ? (
+                    resources.map((resource) => (
+                      <div
+                        key={resource.id}
+                        className="group/resource flex items-center justify-between gap-2 p-1.5 rounded hover:bg-muted/50 text-xs transition-colors"
+                      >
+                        <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+                          <span className="text-muted-foreground flex-shrink-0">
                             {getResourceIcon(resource.resourceType)}
                           </span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-gray-800 dark:text-gray-200 truncate font-medium" title={resource.title}>
-                              {resource.title}
-                            </p>
-                            <p className="text-gray-400 dark:text-gray-500 text-xs mt-0.5">
-                              {resource.resourceType === 'file' && '파일'}
-                              {resource.resourceType === 'memo' && '메모'}
-                              {resource.resourceType === 'material' && '자료'}
-                              {resource.resourceType === 'transcription' && '변환텍스트'}
-                              {resource.resourceType === 'minutes' && '회의록'}
-                              {' · '}
-                              {new Date(resource.createdAt).toLocaleDateString('ko-KR')}
-                            </p>
-                          </div>
+                          <span className="truncate text-muted-foreground group-hover/resource:text-foreground transition-colors" title={resource.title}>
+                            {resource.title}
+                          </span>
                         </div>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             deleteResource(resource.id, project.id);
                           }}
-                          className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-opacity"
-                          title="프로젝트에서 제거"
+                          className="opacity-0 group-hover/resource:opacity-100 p-0.5 text-muted-foreground hover:text-destructive rounded transition-all"
+                          title="Remove"
                         >
-                          ✕
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
                         </button>
                       </div>
+                    ))
+                  ) : (
+                    <div className="py-2 px-2 text-center border border-dashed border-border/50 rounded bg-muted/20">
+                      <p className="text-[10px] text-muted-foreground">Empty Project</p>
                     </div>
-                  ))}
-                </>
-              ) : (
-                <div className="py-3 text-center">
-                  <p className="text-xs text-gray-400 dark:text-gray-500">
-                    자료가 없습니다
-                  </p>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                    파일이나 메모를 드래그하거나<br />
-                    📎 버튼으로 추가하세요
-                  </p>
+                  )}
                 </div>
               )}
             </div>
-          )}
-        </div>
-        );
-      })}
+          );
+        })}
+      </div>
 
       {projects.length === 0 && !isCreating && (
-        <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-2">
-          프로젝트가 없습니다
-        </p>
-      )}
-
-      {/* 드래그 안내 */}
-      {projects.length > 0 && !selectedProjectId && (
-        <div className="text-xs text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-800 rounded px-2 py-2 mt-2">
-          <p className="flex items-center gap-1">
-            <span>💡</span>
-            <span>프로젝트를 선택하고 파일/메모를 드래그하여 추가하세요</span>
-          </p>
+        <div className="text-center py-6 border-2 border-dashed border-border/50 rounded-lg">
+          <p className="text-xs text-muted-foreground">No projects yet</p>
+          <button
+            onClick={() => setIsCreating(true)}
+            className="mt-2 text-xs text-primary hover:underline"
+          >
+            Create one
+          </button>
         </div>
       )}
     </div>

@@ -52,10 +52,12 @@
     "extraResources": []
   },
   "dependencies": {
+    "@anthropic-ai/claude-code": "^2.0.55",
     "@anthropic-ai/sdk": "^0.32.1",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "@google/generative-ai": "^0.21.0",
+    "@octokit/rest": "^22.0.1",
     "@types/react-syntax-highlighter": "^15.5.13",
     "axios": "^1.7.9",
     "better-sqlite3": "^11.7.0",
@@ -64,6 +66,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-session": "^1.18.1",
+    "googleapis": "^166.0.0",
     "katex": "^0.16.25",
     "multer": "^2.0.2",
     "next": "15.5.6",
@@ -81,6 +84,7 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "sharp": "^0.34.4",
+    "tesseract.js": "^6.0.1",
     "uuid": "^11.0.3"
   },
   "devDependencies": {

@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     // 파일 처리: 이미지 파일을 base64로 인코딩, 문서 파일은 텍스트로 추출, 음성 파일은 변환
     const imageData: { type: 'image_url'; image_url: { url: string } }[] = [];
     const documentTexts: string[] = [];
-    
+
     if (files.length > 0) {
       for (const file of files) {
         if (file.type.startsWith('image/')) {
@@ -45,26 +45,26 @@ export async function POST(request: NextRequest) {
           // 음성 파일 처리 - Whisper API로 변환
           try {
             console.log(`음성 파일 변환 시작: ${file.name} (크기: ${(file.size / 1024).toFixed(1)}KB)`);
-            
+
             if (!process.env.OPENAI_API_KEY) {
               console.warn('OPENAI_API_KEY가 설정되지 않아 음성 파일 변환을 건너뜁니다.');
               documentTexts.push(`\n\n[음성 파일: ${file.name}]\n음성 파일 변환을 위해 OPENAI_API_KEY가 필요합니다. 파일명: ${file.name}, 크기: ${(file.size / 1024).toFixed(1)}KB`);
               continue;
             }
-            
+
             const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
             if (file.size > MAX_FILE_SIZE) {
               console.warn(`파일 크기가 너무 큽니다: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`);
               documentTexts.push(`\n\n[음성 파일: ${file.name}]\n파일 크기가 너무 큽니다. 최대 ${MAX_FILE_SIZE / 1024 / 1024}MB까지 업로드 가능합니다. 파일명: ${file.name}, 크기: ${(file.size / 1024).toFixed(1)}KB`);
               continue;
             }
-            
+
             // OpenAI SDK를 사용하여 음성을 텍스트로 변환
             const OpenAI = (await import('openai')).default;
             const openai = new OpenAI({
               apiKey: process.env.OPENAI_API_KEY,
             });
-            
+
             // File 객체를 직접 사용 (OpenAI SDK v6는 File 객체를 직접 지원)
             // Whisper API를 사용하여 음성을 텍스트로 변환
             const transcription = await openai.audio.transcriptions.create({
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
               model: 'whisper-1',
               language: 'ko', // 한국어 설정
             });
-            
+
             if (transcription.text && transcription.text.trim()) {
               documentTexts.push(`\n\n[음성 파일: ${file.name}]\n${transcription.text}`);
               console.log(`음성 파일 변환 완료: ${file.name}`);
@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
             const pdfData = await pdfParse(buffer);
 
             const numPages = pdfData.numpages;
-            let extractedText = pdfData.text || '';
+            const extractedText = pdfData.text || '';
 
             if (extractedText.trim()) {
               // 텍스트가 너무 길면 잘라서 전송
@@ -161,7 +161,7 @@ export async function POST(request: NextRequest) {
 
     // 웹 검색 또는 YouTube 검색이 필요한지 확인
     let searchResults = null;
-    
+
     try {
       const needsSearch = webSearchInstance.needsWebSearch(finalMessage);
       const needsYouTube = webSearchInstance.needsYouTubeSearch(finalMessage);
@@ -210,7 +210,7 @@ export async function POST(request: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
-        
+
         try {
           // 스트리밍 처리 (프로젝트 ID 전달)
           for await (const chunk of orchestratorInstance.processStream(userId, sessionId, finalMessage, searchResults, imageData, projectId || null)) {
@@ -247,8 +247,8 @@ export async function POST(request: NextRequest) {
     }
     const message = error instanceof Error ? error.message : '서버 오류가 발생했습니다.';
     return new Response(
-      JSON.stringify({ 
-        success: false, 
+      JSON.stringify({
+        success: false,
         error: message,
         details: process.env.NODE_ENV === 'development' && error instanceof Error ? error.stack : undefined
       }),

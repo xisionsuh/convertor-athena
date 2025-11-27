@@ -11,6 +11,10 @@ import { createDatabaseQueryTool } from './tools/databaseQuery.js';
 import { createImageProcessorTool } from './tools/imageProcessor.js';
 import { createEmailSenderTool } from './tools/emailSender.js';
 import { createWebBrowserTool } from './tools/webBrowser.js';
+import { createOCRTool } from './tools/ocr.js';
+import { createGoogleCalendarTools } from './tools/googleCalendar.js';
+import { createTranslatorTools } from './tools/translator.js';
+import { createGitHubTools } from './tools/github.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -84,6 +88,46 @@ export class MCPManager extends MCPBase {
         this.registerTool(webBrowserTool);
       } catch (error) {
         logger.warn('Web browser tool not available', { error: error.message });
+      }
+
+      // OCR 도구 등록 (tesseract.js가 설치된 경우에만)
+      try {
+        const ocrTool = createOCRTool({
+          workspaceRoot: this.workspaceRoot
+        });
+        this.registerTool(ocrTool);
+      } catch (error) {
+        logger.warn('OCR tool not available', { error: error.message });
+      }
+
+      // Google Calendar 도구 등록
+      try {
+        const calendarTools = createGoogleCalendarTools();
+        calendarTools.forEach(tool => {
+          this.registerTool(tool);
+        });
+      } catch (error) {
+        logger.warn('Google Calendar tools not available', { error: error.message });
+      }
+
+      // 번역 도구 등록
+      try {
+        const translatorTools = createTranslatorTools();
+        translatorTools.forEach(tool => {
+          this.registerTool(tool);
+        });
+      } catch (error) {
+        logger.warn('Translator tools not available', { error: error.message });
+      }
+
+      // GitHub 도구 등록
+      try {
+        const githubTools = createGitHubTools();
+        githubTools.forEach(tool => {
+          this.registerTool(tool);
+        });
+      } catch (error) {
+        logger.warn('GitHub tools not available', { error: error.message });
       }
 
       logger.info('MCP tools initialized', {
