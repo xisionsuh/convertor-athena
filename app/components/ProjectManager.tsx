@@ -1,13 +1,15 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import type { Project } from '../types';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import type { Project, ProjectResource } from '../types';
 
 interface ProjectManagerProps {
   userId: string;
   selectedProjectId: string | null;
   onSelectProject: (projectId: string | null) => void;
   showToast: (message: string, type: 'success' | 'info' | 'error') => void;
+  onAddResourceToProject?: (projectId: string, resourceType: string, resourceId: string, title: string, content?: string) => Promise<void>;
+  refreshTrigger?: number; // 외부에서 새로고침 트리거
 }
 
 export default function ProjectManager({
@@ -15,41 +17,93 @@ export default function ProjectManager({
   selectedProjectId,
   onSelectProject,
   showToast,
+  onAddResourceToProject,
+  refreshTrigger,
 }: ProjectManagerProps) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
   const [isUploading, setIsUploading] = useState(false);
-  const [projectResources, setProjectResources] = useState<any[]>([]);
-  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
+  const [projectResources, setProjectResources] = useState<Record<string, ProjectResource[]>>({});
+  const [dragOverProjectId, setDragOverProjectId] = useState<string | null>(null);
+  const [resourceCounts, setResourceCounts] = useState<Record<string, number>>({});
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (userId) {
-      loadProjects();
-    }
-  }, [userId]);
-
-  useEffect(() => {
-    if (selectedProjectId) {
-      loadProjectResources(selectedProjectId);
-    } else {
-      setProjectResources([]);
-    }
-  }, [selectedProjectId]);
-
-  const loadProjects = async () => {
+  // 프로젝트 목록 로드
+  const loadProjects = useCallback(async () => {
     try {
       const response = await fetch(`/api/projects?userId=${userId}`);
       const data = await response.json();
       if (data.success) {
         setProjects(data.projects);
+        // 각 프로젝트의 자료 개수 로드
+        data.projects.forEach((project: Project) => {
+          loadResourceCount(project.id);
+        });
       }
     } catch (error) {
       console.error('Failed to load projects:', error);
     }
+  }, [userId]);
+
+  // 프로젝트 자료 개수 로드
+  const loadResourceCount = async (projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/resources`);
+      const data = await response.json();
+      if (data.success) {
+        setResourceCounts(prev => ({ ...prev, [projectId]: data.resources?.length || 0 }));
+      }
+    } catch (error) {
+      console.error('Failed to load resource count:', error);
+    }
   };
+
+  // 프로젝트 자료 목록 로드
+  const loadProjectResources = useCallback(async (projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/resources`);
+      const data = await response.json();
+      if (data.success) {
+        setProjectResources(prev => ({ ...prev, [projectId]: data.resources || [] }));
+        setResourceCounts(prev => ({ ...prev, [projectId]: data.resources?.length || 0 }));
+      }
+    } catch (error) {
+      console.error('Failed to load project resources:', error);
+    }
+  }, []);
+
+  // 프로젝트 토글 함수
+  const toggleProject = useCallback((projectId: string) => {
+    setExpandedProjects(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(projectId)) {
+        newSet.delete(projectId);
+      } else {
+        newSet.add(projectId);
+        // 펼칠 때 자료 로드
+        loadProjectResources(projectId);
+      }
+      return newSet;
+    });
+  }, [loadProjectResources]);
+
+  useEffect(() => {
+    if (userId) {
+      loadProjects();
+    }
+  }, [userId, loadProjects]);
+
+  // 외부 새로고침 트리거 - 펼쳐진 모든 프로젝트 새로고침
+  useEffect(() => {
+    if (refreshTrigger) {
+      expandedProjects.forEach(projectId => {
+        loadProjectResources(projectId);
+      });
+    }
+  }, [refreshTrigger, expandedProjects, loadProjectResources]);
 
   const createProject = async () => {
     if (!newProjectName.trim()) {
@@ -71,6 +125,7 @@ export default function ProjectManager({
       const data = await response.json();
       if (data.success) {
         setProjects(prev => [data.project, ...prev]);
+        setResourceCounts(prev => ({ ...prev, [data.project.id]: 0 }));
         setNewProjectName('');
         setNewProjectDesc('');
         setIsCreating(false);
@@ -110,8 +165,12 @@ export default function ProjectManager({
     }
   };
 
+  // 업로드 대상 프로젝트 ID를 저장
+  const [uploadTargetProjectId, setUploadTargetProjectId] = useState<string | null>(null);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!selectedProjectId) {
+    const targetProjectId = uploadTargetProjectId;
+    if (!targetProjectId) {
       showToast('프로젝트를 먼저 선택해주세요.', 'error');
       return;
     }
@@ -127,7 +186,7 @@ export default function ProjectManager({
         formData.append('files', file);
       });
 
-      const response = await fetch(`/api/projects/${selectedProjectId}/upload`, {
+      const response = await fetch(`/api/projects/${targetProjectId}/upload`, {
         method: 'POST',
         body: formData,
       });
@@ -135,14 +194,11 @@ export default function ProjectManager({
       const data = await response.json();
       if (data.success) {
         showToast(data.message || '파일이 업로드되었습니다.', 'success');
-        // 파일 입력 초기화
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
         // 자료 목록 새로고침
-        if (selectedProjectId) {
-          loadProjectResources(selectedProjectId);
-        }
+        loadProjectResources(targetProjectId);
       } else {
         showToast(data.error || '파일 업로드 실패', 'error');
       }
@@ -151,34 +207,16 @@ export default function ProjectManager({
       showToast('파일 업로드 중 오류가 발생했습니다.', 'error');
     } finally {
       setIsUploading(false);
+      setUploadTargetProjectId(null);
     }
   };
 
-  const triggerFileUpload = () => {
-    if (!selectedProjectId) {
-      showToast('프로젝트를 먼저 선택해주세요.', 'error');
-      return;
-    }
+  const triggerFileUpload = (projectId: string) => {
+    setUploadTargetProjectId(projectId);
     fileInputRef.current?.click();
   };
 
-  const loadProjectResources = async (projectId: string) => {
-    try {
-      const response = await fetch(`/api/projects/${projectId}/resources`);
-      const data = await response.json();
-      if (data.success) {
-        setProjectResources(data.resources || []);
-      }
-    } catch (error) {
-      console.error('Failed to load project resources:', error);
-    }
-  };
-
   const deleteResource = async (resourceId: string, projectId: string) => {
-    if (!confirm('이 자료를 삭제하시겠습니까?')) {
-      return;
-    }
-
     try {
       const response = await fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
         method: 'DELETE',
@@ -186,25 +224,89 @@ export default function ProjectManager({
 
       const data = await response.json();
       if (data.success) {
-        setProjectResources(prev => prev.filter(r => r.id !== resourceId));
-        showToast('자료가 삭제되었습니다.', 'info');
+        setProjectResources(prev => ({
+          ...prev,
+          [projectId]: (prev[projectId] || []).filter(r => r.id !== resourceId)
+        }));
+        setResourceCounts(prev => ({ ...prev, [projectId]: Math.max(0, (prev[projectId] || 1) - 1) }));
+        showToast('자료가 프로젝트에서 제거되었습니다.', 'info');
       } else {
-        showToast(data.error || '자료 삭제 실패', 'error');
+        showToast(data.error || '자료 제거 실패', 'error');
       }
     } catch (error) {
       console.error('Failed to delete resource:', error);
-      showToast('자료 삭제 중 오류가 발생했습니다.', 'error');
+      showToast('자료 제거 중 오류가 발생했습니다.', 'error');
     }
   };
 
-  const toggleProjectExpansion = (projectId: string) => {
-    if (expandedProjectId === projectId) {
-      setExpandedProjectId(null);
-    } else {
-      setExpandedProjectId(projectId);
-      if (projectId !== selectedProjectId) {
+  // 드롭 핸들러
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>, projectId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setDragOverProjectId(projectId);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOverProjectId(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>, projectId: string) => {
+    e.preventDefault();
+    setDragOverProjectId(null);
+
+    try {
+      const data = e.dataTransfer.getData('application/json');
+      if (!data) return;
+
+      const item = JSON.parse(data);
+
+      if (onAddResourceToProject) {
+        await onAddResourceToProject(
+          projectId,
+          item.type,
+          item.id,
+          item.fileName || item.title,
+          item.transcription || item.content || ''
+        );
+        showToast(`"${item.fileName || item.title}"이(가) 프로젝트에 추가되었습니다.`, 'success');
+
+        // 자료 목록 및 개수 새로고침
         loadProjectResources(projectId);
+      } else {
+        const response = await fetch(`/api/projects/${projectId}/resources`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            resourceType: item.type,
+            resourceId: item.id,
+            title: item.fileName || item.title,
+            content: item.transcription || item.content || '',
+          }),
+        });
+
+        const result = await response.json();
+        if (result.success) {
+          showToast(`"${item.fileName || item.title}"이(가) 프로젝트에 추가되었습니다.`, 'success');
+          loadProjectResources(projectId);
+        } else {
+          showToast(result.error || '추가 실패', 'error');
+        }
       }
+    } catch (error) {
+      console.error('Drop error:', error);
+      showToast('자료 추가 중 오류가 발생했습니다.', 'error');
+    }
+  };
+
+  const getResourceIcon = (type: string) => {
+    switch (type) {
+      case 'file': return '📄';
+      case 'memo': return '📝';
+      case 'material': return '📎';
+      case 'transcription': return '🎤';
+      case 'minutes': return '📋';
+      default: return '📄';
     }
   };
 
@@ -212,24 +314,12 @@ export default function ProjectManager({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400">📁 프로젝트</h3>
-        <div className="flex gap-1">
-          {selectedProjectId && (
-            <button
-              onClick={triggerFileUpload}
-              disabled={isUploading}
-              className="text-xs text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-300 font-medium disabled:opacity-50"
-              title="자료 업로드"
-            >
-              {isUploading ? '업로드 중...' : '📎 자료'}
-            </button>
-          )}
-          <button
-            onClick={() => setIsCreating(!isCreating)}
-            className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium"
-          >
-            {isCreating ? '취소' : '+ 새 프로젝트'}
-          </button>
-        </div>
+        <button
+          onClick={() => setIsCreating(!isCreating)}
+          className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium"
+        >
+          {isCreating ? '취소' : '+ 새 프로젝트'}
+        </button>
       </div>
 
       {/* 숨겨진 파일 입력 */}
@@ -289,136 +379,165 @@ export default function ProjectManager({
             : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 border-2 border-transparent'
         }`}
       >
-        <p className="text-xs font-medium text-gray-900 dark:text-gray-100">전체</p>
+        <p className="text-xs font-medium text-gray-900 dark:text-gray-100">📂 전체 보기</p>
         <p className="text-xs text-gray-500 dark:text-gray-400">모든 파일 및 메모</p>
       </div>
 
       {/* 프로젝트 목록 */}
-      {projects.map((project) => (
-        <div key={project.id}>
+      {projects.map((project) => {
+        const isExpanded = expandedProjects.has(project.id);
+        const resources = projectResources[project.id] || [];
+
+        return (
+        <div key={project.id} className="space-y-1">
+          {/* 프로젝트 헤더 */}
           <div
-            className={`p-2 rounded cursor-pointer transition-colors ${
-              selectedProjectId === project.id
+            onDragOver={(e) => handleDragOver(e, project.id)}
+            onDragLeave={handleDragLeave}
+            onDrop={(e) => handleDrop(e, project.id)}
+            onClick={() => {
+              toggleProject(project.id);
+              onSelectProject(project.id);
+            }}
+            className={`p-2 rounded cursor-pointer transition-all ${
+              dragOverProjectId === project.id
+                ? 'bg-green-100 dark:bg-green-900/50 border-2 border-dashed border-green-500 dark:border-green-400 scale-[1.02] shadow-lg'
+                : selectedProjectId === project.id
                 ? 'bg-green-50 dark:bg-green-900/30 border-2 border-green-500 dark:border-green-400'
                 : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 border-2 border-transparent'
             }`}
-            onClick={() => onSelectProject(project.id)}
           >
             <div className="flex items-start justify-between">
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-xs transition-transform ${isExpanded ? 'rotate-90' : ''}`}>▶</span>
+                  <span className="text-sm">📁</span>
                   <p className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate" title={project.name}>
                     {project.name}
                   </p>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleProjectExpansion(project.id);
-                    }}
-                    className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-xs"
-                    title="자료 목록 보기"
-                  >
-                    {expandedProjectId === project.id ? '▼' : '▶'}
-                  </button>
+                  {/* 자료 개수 뱃지 */}
+                  {(resourceCounts[project.id] || 0) > 0 && (
+                    <span className="px-1.5 py-0.5 text-xs font-medium bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300 rounded-full">
+                      {resourceCounts[project.id]}
+                    </span>
+                  )}
                 </div>
                 {project.description && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1 ml-7">
                     {project.description}
                   </p>
                 )}
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                  {new Date(project.updatedAt).toLocaleDateString('ko-KR')}
-                </p>
-              </div>
-              <div className="flex gap-1">
-                {selectedProjectId === project.id && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      triggerFileUpload();
-                    }}
-                    className="text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-300 text-sm"
-                    title="자료 업로드"
-                  >
-                    📎
-                  </button>
+                {dragOverProjectId === project.id && (
+                  <p className="text-xs text-green-600 dark:text-green-400 font-medium mt-1 ml-7 animate-pulse">
+                    ↓ 여기에 놓으세요!
+                  </p>
                 )}
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerFileUpload(project.id);
+                  }}
+                  disabled={isUploading}
+                  className="text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-300 text-sm p-1 hover:bg-green-100 dark:hover:bg-green-900/30 rounded disabled:opacity-50"
+                  title="자료 업로드"
+                >
+                  {isUploading && uploadTargetProjectId === project.id ? '⏳' : '📎'}
+                </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     deleteProject(project.id);
                   }}
-                  className="text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 text-sm"
-                  title="삭제"
+                  className="text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 text-sm p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded"
+                  title="프로젝트 삭제"
                 >
                   ×
                 </button>
               </div>
             </div>
           </div>
-          
-          {/* 프로젝트 자료 목록 (확장 시 표시) */}
-          {expandedProjectId === project.id && (
-            <div className="ml-4 mt-1 mb-2 pl-2 border-l-2 border-gray-200 dark:border-gray-600 space-y-1">
-              {selectedProjectId === project.id && projectResources.length > 0 ? (
-                projectResources.map((resource) => (
-                  <div
-                    key={resource.id}
-                    className="p-1.5 bg-white dark:bg-gray-800 rounded text-xs border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1">
-                          <span className="text-gray-500 dark:text-gray-400">
-                            {resource.resource_type === 'file' && '📄'}
-                            {resource.resource_type === 'memo' && '📝'}
-                            {resource.resource_type === 'material' && '📎'}
-                            {resource.resource_type === 'transcription' && '🎤'}
-                            {resource.resource_type === 'minutes' && '📋'}
+
+          {/* 프로젝트 자료 목록 (토글로 펼치기/접기) */}
+          {isExpanded && (
+            <div className="ml-3 pl-3 border-l-2 border-green-300 dark:border-green-700 space-y-1">
+              {resources.length > 0 ? (
+                <>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 font-medium py-1">
+                    프로젝트 자료 ({resources.length}개)
+                  </p>
+                  {resources.map((resource) => (
+                    <div
+                      key={resource.id}
+                      className="group p-2 bg-white dark:bg-gray-800 rounded text-xs border border-gray-200 dark:border-gray-700 hover:border-green-300 dark:hover:border-green-600 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2 flex-1 min-w-0">
+                          <span className="text-sm flex-shrink-0">
+                            {getResourceIcon(resource.resourceType)}
                           </span>
-                          <p className="text-gray-700 dark:text-gray-300 truncate" title={resource.title}>
-                            {resource.title}
-                          </p>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-gray-800 dark:text-gray-200 truncate font-medium" title={resource.title}>
+                              {resource.title}
+                            </p>
+                            <p className="text-gray-400 dark:text-gray-500 text-xs mt-0.5">
+                              {resource.resourceType === 'file' && '파일'}
+                              {resource.resourceType === 'memo' && '메모'}
+                              {resource.resourceType === 'material' && '자료'}
+                              {resource.resourceType === 'transcription' && '변환텍스트'}
+                              {resource.resourceType === 'minutes' && '회의록'}
+                              {' · '}
+                              {new Date(resource.createdAt).toLocaleDateString('ko-KR')}
+                            </p>
+                          </div>
                         </div>
-                        {resource.metadata && (
-                          <p className="text-gray-400 dark:text-gray-500 text-xs mt-0.5">
-                            {resource.metadata.fileSize && `${(resource.metadata.fileSize / 1024).toFixed(1)} KB`}
-                            {resource.metadata.fileType && ` · ${resource.metadata.fileType}`}
-                          </p>
-                        )}
-                        <p className="text-gray-400 dark:text-gray-500 text-xs mt-0.5">
-                          {new Date(resource.createdAt).toLocaleDateString('ko-KR')}
-                        </p>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteResource(resource.id, project.id);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-opacity"
+                          title="프로젝트에서 제거"
+                        >
+                          ✕
+                        </button>
                       </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteResource(resource.id, project.id);
-                        }}
-                        className="text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 text-xs ml-2"
-                        title="삭제"
-                      >
-                        ×
-                      </button>
                     </div>
-                  </div>
-                ))
-              ) : selectedProjectId === project.id ? (
-                <p className="text-xs text-gray-400 dark:text-gray-500 py-1">자료가 없습니다</p>
+                  ))}
+                </>
               ) : (
-                <p className="text-xs text-gray-400 dark:text-gray-500 py-1">프로젝트를 선택하면 자료를 볼 수 있습니다</p>
+                <div className="py-3 text-center">
+                  <p className="text-xs text-gray-400 dark:text-gray-500">
+                    자료가 없습니다
+                  </p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                    파일이나 메모를 드래그하거나<br />
+                    📎 버튼으로 추가하세요
+                  </p>
+                </div>
               )}
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
 
       {projects.length === 0 && !isCreating && (
         <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-2">
           프로젝트가 없습니다
         </p>
       )}
+
+      {/* 드래그 안내 */}
+      {projects.length > 0 && !selectedProjectId && (
+        <div className="text-xs text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-800 rounded px-2 py-2 mt-2">
+          <p className="flex items-center gap-1">
+            <span>💡</span>
+            <span>프로젝트를 선택하고 파일/메모를 드래그하여 추가하세요</span>
+          </p>
+        </div>
+      )}
     </div>
   );
 }
-

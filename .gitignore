@@ -53,3 +53,9 @@ src-tauri/Cargo.lock
 
 # logs
 *.log
+
+# database files (user data)
+athena-data/*.db
+athena-data/*.db-shm
+athena-data/*.db-wal
+athena-data/*.backup

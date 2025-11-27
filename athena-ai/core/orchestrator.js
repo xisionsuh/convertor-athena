@@ -614,26 +614,23 @@ URL: ${result.link}
     if (this.mcpManager && this.mcpManager.enabled && fullContent) {
       const toolResult = await this.mcpManager.processToolCalls(fullContent);
       if (toolResult.hasToolCalls) {
-        // 도구 실행 결과를 스트리밍으로 전송
-        const toolResultJson = JSON.stringify({ 
-          type: 'tool_result', 
-          data: toolResult.results 
-        }, null, 0);
-        yield toolResultJson + '\n';
-        
-        // 업데이트된 응답 전송
-        const updatedResponseJson = JSON.stringify({ 
-          type: 'updated_response', 
-          content: toolResult.updatedResponse 
-        }, null, 0);
-        yield updatedResponseJson + '\n';
-        
-        logger.info('MCP tools executed in stream', { 
-          toolCount: toolResult.results.length 
+        logger.info('MCP tools executed in stream', {
+          toolCount: toolResult.results.length,
+          tools: toolResult.results.map(r => r.tool)
         });
-        
-        // 메모리에 업데이트된 응답 저장
-        fullContent = toolResult.updatedResponse;
+
+        // 도구 실행 결과를 사용자에게 보기 좋게 포맷하여 전송
+        for (const result of toolResult.results) {
+          const resultText = `\n\n**🔧 도구 실행: ${result.tool}**\n${
+            result.result.success
+              ? `✅ 성공\n\`\`\`json\n${JSON.stringify(result.result, null, 2)}\n\`\`\``
+              : `❌ 실패: ${result.result.error}`
+          }\n`;
+
+          const chunkJson = JSON.stringify({ type: 'chunk', content: resultText }, null, 0);
+          yield chunkJson + '\n';
+          fullContent += resultText;
+        }
       }
     }
 
@@ -1203,10 +1200,11 @@ ${results.map((r, i) => `[${r.agent}의 답변]\n${r.content}\n`).join('\n')}
       const agent = this.providers[agentName];
       if (!agent || !agent.isAvailable) continue;
 
-      yield JSON.stringify({ 
-        type: 'step_start', 
-        step: i + 1, 
-        agent: agentName 
+      yield JSON.stringify({
+        type: 'step_start',
+        step: i + 1,
+        total: agents.length,
+        agent: agentName
       }, null, 0) + '\n';
 
       const stepPrompt = `이전 단계의 결과를 바탕으로 다음 작업을 수행하세요.\n\n${currentResult}`;

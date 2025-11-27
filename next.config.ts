@@ -1,3 +1,4 @@
+import path from "path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -11,8 +12,6 @@ const nextConfig: NextConfig = {
     
     // athena-ai 디렉토리를 모듈로 인식하도록 설정
     if (isServer) {
-      const path = require('path');
-      
       // athena-ai를 절대 경로로 매핑
       config.resolve.alias = {
         ...config.resolve.alias,

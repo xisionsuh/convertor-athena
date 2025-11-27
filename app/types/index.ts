@@ -12,6 +12,7 @@ export interface FileSession {
   status: SessionStatus;
   createdAt: Date;
   error?: string;
+  projectId?: string;
 }
 
 export interface FileChunk {
@@ -23,7 +24,7 @@ export interface FileChunk {
 export type SessionStatus = 'pending' | 'transcribing' | 'completed' | 'error';
 
 export interface Toast {
-  id: number;
+  id: string;
   message: string;
   type: ToastType;
 }
@@ -46,7 +47,9 @@ export interface MemoSession {
   content: string;
   createdAt: Date;
   updatedAt: Date;
-  type: 'memo';
+  type: 'memo' | 'chat';
+  messageCount?: number;
+  projectId?: string;
 }
 
 export interface Project {
@@ -65,7 +68,7 @@ export interface ProjectResource {
   resourceId: string;
   title: string;
   content?: string;
-  metadata?: any;
+  metadata?: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
 }

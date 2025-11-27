@@ -15,7 +15,12 @@ export async function GET(request: NextRequest) {
     // DB에서 사용자 정보 확인
     const orchestratorInstance = getOrchestrator();
     const db = orchestratorInstance.memory.db;
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any;
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as {
+      id: string;
+      google_id?: string;
+      email?: string;
+      name?: string;
+    } | undefined;
 
     if (!user) {
       return NextResponse.json({
@@ -32,12 +37,12 @@ export async function GET(request: NextRequest) {
         name: user.name || userName,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Auth status error:', error);
+    const message = error instanceof Error ? error.message : undefined;
     return NextResponse.json({
       authenticated: false,
-      error: error.message,
+      error: message,
     });
   }
 }
-

@@ -21,10 +21,11 @@ export async function GET(request: NextRequest) {
       success: true,
       memories
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Memory API error:', error);
+    const message = error instanceof Error ? error.message : '서버 오류가 발생했습니다.';
     return NextResponse.json(
-      { success: false, error: error.message || '서버 오류가 발생했습니다.' },
+      { success: false, error: message },
       { status: 500 }
     );
   }
@@ -50,12 +51,12 @@ export async function DELETE(request: NextRequest) {
       success: true,
       message: '기억이 삭제되었습니다.'
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Memory delete error:', error);
+    const message = error instanceof Error ? error.message : '서버 오류가 발생했습니다.';
     return NextResponse.json(
-      { success: false, error: error.message || '서버 오류가 발생했습니다.' },
+      { success: false, error: message },
       { status: 500 }
     );
   }
 }
-

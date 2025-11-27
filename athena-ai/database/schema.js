@@ -149,12 +149,21 @@ export function initializeDatabase(dbPath = './data/athena.db') {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       title TEXT,
+      project_id TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       is_active INTEGER DEFAULT 1,
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (project_id) REFERENCES projects(id)
     )
   `);
+
+  // 기존 테이블에 project_id 컬럼 추가 (마이그레이션)
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN project_id TEXT`);
+  } catch (e) {
+    // 컬럼이 이미 존재하면 무시
+  }
 
   // 검색 결과 피드백
   db.exec(`

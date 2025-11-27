@@ -3,10 +3,10 @@ import { getOrchestrator } from '../../../athena/utils';
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { projectId: string } }
+  { params }: { params: Promise<{ projectId: string }> }
 ) {
   try {
-    const { projectId } = params;
+    const { projectId } = await params;
     const formData = await request.formData();
     const files = formData.getAll('files') as File[];
 
@@ -20,11 +20,16 @@ export async function POST(
     const orchestratorInstance = getOrchestrator();
     const db = orchestratorInstance.memory.db;
 
-    const uploadedResources = [];
+    const uploadedResources: Array<{
+      id: string;
+      fileName: string;
+      fileType: string;
+      fileSize: number;
+    }> = [];
 
     for (const file of files) {
       let content = '';
-      let metadata: any = {
+      const metadata: Record<string, unknown> = {
         fileName: file.name,
         fileSize: file.size,
         fileType: file.type,
@@ -134,12 +139,12 @@ export async function POST(
       message: `${uploadedResources.length}개의 파일이 프로젝트에 업로드되었습니다.`,
       resources: uploadedResources,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Project file upload error:', error);
+    const message = error instanceof Error ? error.message : '서버 오류가 발생했습니다.';
     return NextResponse.json(
-      { success: false, error: error.message || '서버 오류가 발생했습니다.' },
+      { success: false, error: message },
       { status: 500 }
     );
   }
 }
-

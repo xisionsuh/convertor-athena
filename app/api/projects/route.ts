@@ -20,20 +20,28 @@ export async function GET(request: NextRequest) {
       SELECT * FROM projects 
       WHERE user_id = ? 
       ORDER BY updated_at DESC
-    `).all(userId);
+    `).all(userId) as Array<{
+      id: string;
+      user_id: string;
+      name: string;
+      description?: string | null;
+      created_at: string | number | Date;
+      updated_at: string | number | Date;
+    }>;
 
     return NextResponse.json({
       success: true,
-      projects: projects.map((p: any) => ({
+      projects: projects.map((p) => ({
         ...p,
         createdAt: new Date(p.created_at),
         updatedAt: new Date(p.updated_at),
       }))
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Projects fetch error:', error);
+    const message = error instanceof Error ? error.message : '서버 오류가 발생했습니다.';
     return NextResponse.json(
-      { success: false, error: error.message || '서버 오류가 발생했습니다.' },
+      { success: false, error: message },
       { status: 500 }
     );
   }
@@ -61,20 +69,25 @@ export async function POST(request: NextRequest) {
       VALUES (?, ?, ?, ?)
     `).run(projectId, userId, name, description || '');
 
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as {
+      id: string;
+      created_at: string | number | Date;
+      updated_at: string | number | Date;
+    };
 
     return NextResponse.json({
       success: true,
       project: {
         ...project,
-        createdAt: new Date((project as any).created_at),
-        updatedAt: new Date((project as any).updated_at),
+        createdAt: new Date(project.created_at),
+        updatedAt: new Date(project.updated_at),
       }
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Project creation error:', error);
+    const message = error instanceof Error ? error.message : '서버 오류가 발생했습니다.';
     return NextResponse.json(
-      { success: false, error: error.message || '서버 오류가 발생했습니다.' },
+      { success: false, error: message },
       { status: 500 }
     );
   }
@@ -101,12 +114,12 @@ export async function DELETE(request: NextRequest) {
       success: true,
       message: '프로젝트가 삭제되었습니다.'
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Project deletion error:', error);
+    const message = error instanceof Error ? error.message : '서버 오류가 발생했습니다.';
     return NextResponse.json(
-      { success: false, error: error.message || '서버 오류가 발생했습니다.' },
+      { success: false, error: message },
       { status: 500 }
     );
   }
 }
-

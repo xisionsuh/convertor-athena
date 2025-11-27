@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getOrchestrator } from '../../athena/utils';
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const orchestratorInstance = getOrchestrator();
     const db = orchestratorInstance.memory.db;
@@ -53,12 +53,12 @@ export async function GET(request: NextRequest) {
       success: true,
       userId: latestUserId,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Latest user ID fetch error:', error);
+    const message = error instanceof Error ? error.message : '서버 오류가 발생했습니다.';
     return NextResponse.json(
-      { success: false, error: error.message || '서버 오류가 발생했습니다.' },
+      { success: false, error: message },
       { status: 500 }
     );
   }
 }
-

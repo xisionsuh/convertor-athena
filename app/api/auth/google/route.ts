@@ -93,7 +93,9 @@ export async function GET(request: NextRequest) {
       const orchestratorInstance = getOrchestrator();
       const db = orchestratorInstance.memory.db;
 
-      let user = db.prepare('SELECT * FROM users WHERE google_id = ?').get(googleId) as any;
+      let user = db.prepare('SELECT * FROM users WHERE google_id = ?').get(googleId) as {
+        id: string;
+      } | undefined;
 
       if (!user) {
         // 새 사용자 생성
@@ -102,16 +104,20 @@ export async function GET(request: NextRequest) {
           INSERT INTO users (id, google_id, email, name, last_login)
           VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
         `).run(userId, googleId, email, name);
-        user = db.prepare('SELECT * FROM users WHERE google_id = ?').get(googleId) as any;
+        user = db.prepare('SELECT * FROM users WHERE google_id = ?').get(googleId) as { id: string } | undefined;
       } else {
         // 마지막 로그인 시간 업데이트
         db.prepare('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE google_id = ?').run(googleId);
-        user = db.prepare('SELECT * FROM users WHERE google_id = ?').get(googleId) as any;
+        user = db.prepare('SELECT * FROM users WHERE google_id = ?').get(googleId) as { id: string } | undefined;
       }
 
       // 로그인 성공 - 사용자 정보를 쿠키에 저장하고 리다이렉트
+      if (!user) {
+        return NextResponse.json({ success: false, error: '사용자 생성 실패' }, { status: 500 });
+      }
+
       const response = NextResponse.redirect(`${BASE_URL}?google_login=success`);
-      
+
       // 사용자 정보를 쿠키에 저장 (보안을 위해 httpOnly 사용)
       response.cookies.set('athena_user_id', user.id, {
         httpOnly: true,
@@ -131,12 +137,12 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({ success: false, error: '잘못된 요청입니다.' }, { status: 400 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Google auth error:', error);
+    const message = error instanceof Error ? error.message : '인증 오류가 발생했습니다.';
     return NextResponse.json(
-      { success: false, error: error.message || '인증 오류가 발생했습니다.' },
+      { success: false, error: message },
       { status: 500 }
     );
   }
 }
-

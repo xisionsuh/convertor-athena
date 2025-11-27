@@ -3,33 +3,44 @@ import { getOrchestrator } from '../../../athena/utils';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { projectId: string } }
+  { params }: { params: Promise<{ projectId: string }> }
 ) {
   try {
-    const { projectId } = params;
+    const { projectId } = await params;
 
     const orchestratorInstance = getOrchestrator();
     const db = orchestratorInstance.memory.db;
 
     const resources = db.prepare(`
-      SELECT * FROM project_resources 
-      WHERE project_id = ? 
+      SELECT * FROM project_resources
+      WHERE project_id = ?
       ORDER BY created_at DESC
-    `).all(projectId);
+    `).all(projectId) as Array<{
+      id: string;
+      project_id: string;
+      resource_type: string;
+      resource_id: string;
+      title: string;
+      content?: string | null;
+      metadata?: string | null;
+      created_at: string | number | Date;
+      updated_at: string | number | Date;
+    }>;
 
     return NextResponse.json({
       success: true,
-      resources: resources.map((r: any) => ({
+      resources: resources.map((r) => ({
         ...r,
         createdAt: new Date(r.created_at),
         updatedAt: new Date(r.updated_at),
         metadata: r.metadata ? JSON.parse(r.metadata) : null,
       }))
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Project resources fetch error:', error);
+    const message = error instanceof Error ? error.message : '서버 오류가 발생했습니다.';
     return NextResponse.json(
-      { success: false, error: error.message || '서버 오류가 발생했습니다.' },
+      { success: false, error: message },
       { status: 500 }
     );
   }
@@ -37,10 +48,10 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { projectId: string } }
+  { params }: { params: Promise<{ projectId: string }> }
 ) {
   try {
-    const { projectId } = params;
+    const { projectId } = await params;
     const body = await request.json();
     const { resourceType, resourceId, title, content, metadata } = body;
 
@@ -70,7 +81,7 @@ export async function POST(
     );
 
     // 프로젝트 컨텍스트에도 추가
-    const contextId = db.prepare(`
+    db.prepare(`
       INSERT INTO project_context (project_id, context_type, title, content, source_resource_id, importance)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(
@@ -80,7 +91,7 @@ export async function POST(
       content || '',
       resourceDbId,
       5
-    ).lastInsertRowid;
+    );
 
     return NextResponse.json({
       success: true,
@@ -94,12 +105,12 @@ export async function POST(
         metadata,
       }
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Project resource creation error:', error);
+    const message = error instanceof Error ? error.message : '서버 오류가 발생했습니다.';
     return NextResponse.json(
-      { success: false, error: error.message || '서버 오류가 발생했습니다.' },
+      { success: false, error: message },
       { status: 500 }
     );
   }
 }
-

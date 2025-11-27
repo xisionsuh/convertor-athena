@@ -15,10 +15,27 @@ const eslintConfig = [
     ignores: [
       "node_modules/**",
       ".next/**",
+      "**/.next/**",
       "out/**",
       "build/**",
+      "dist/**",
+      "workspace/**",
+      "athena-ai/**",
+      "athena-data/**",
+      "electron/main.js",
       "next-env.d.ts",
+      "**/next-env.d.ts",
     ],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "warn",
+    },
+  },
+  {
+    files: ["electron/**/*.js", "electron/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+      "@typescript-eslint/no-unused-vars": "off",
+    },
   },
 ];
 

@@ -1,7 +1,11 @@
-const { app, BrowserWindow, protocol, session } = require('electron');
-const path = require('path');
-const { spawn } = require('child_process');
-const fs = require('fs');
+import { app, BrowserWindow } from 'electron';
+import path from 'path';
+import { spawn } from 'child_process';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // V8 프로파일링 및 Inspector 비활성화 (크래시 방지)
 // 환경 변수 설정 (app.commandLine.appendSwitch 전에 설정해야 함)

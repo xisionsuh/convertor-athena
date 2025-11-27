@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 import { getOrchestrator } from '../athena/utils';
 
@@ -30,6 +31,27 @@ export async function GET(request: NextRequest) {
       ORDER BY updated_at DESC
     `).all(userId);
 
+    // 채팅 세션 조회 (sessions 테이블과 short_term_memory를 조인하여 조회)
+    const chatSessions = db.prepare(`
+      SELECT
+        s.id,
+        s.user_id,
+        s.title,
+        s.project_id,
+        s.created_at,
+        s.updated_at,
+        COALESCE(m.message_count, 0) as message_count
+      FROM sessions s
+      LEFT JOIN (
+        SELECT session_id, COUNT(*) as message_count
+        FROM short_term_memory
+        GROUP BY session_id
+      ) m ON s.id = m.session_id
+      WHERE s.user_id = ?
+      ORDER BY s.updated_at DESC
+      LIMIT 50
+    `).all(userId);
+
     return NextResponse.json({
       success: true,
       fileSessions: fileSessions.map((s: any) => ({
@@ -43,6 +65,16 @@ export async function GET(request: NextRequest) {
         ...m,
         createdAt: new Date(m.created_at),
         updatedAt: new Date(m.updated_at),
+      })),
+      chatSessions: chatSessions.map((c: any) => ({
+        id: c.id,
+        userId: c.user_id,
+        title: c.title || `채팅 세션 (${c.message_count}개 메시지)`,
+        messageCount: c.message_count,
+        projectId: c.project_id || undefined,
+        createdAt: new Date(c.created_at),
+        updatedAt: new Date(c.updated_at),
+        type: 'chat' as const,
       }))
     });
   } catch (error: any) {
@@ -163,4 +195,3 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
-

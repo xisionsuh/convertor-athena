@@ -76,12 +76,12 @@ export async function POST(request: NextRequest) {
         ...result.metadata
       }
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Athena API error:', error);
+    const message = error instanceof Error ? error.message : '서버 오류가 발생했습니다.';
     return NextResponse.json(
-      { success: false, error: error.message || '서버 오류가 발생했습니다.' },
+      { success: false, error: message },
       { status: 500 }
     );
   }
 }
-

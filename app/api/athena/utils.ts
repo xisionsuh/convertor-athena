@@ -1,9 +1,9 @@
 import path from 'path';
-// @ts-ignore - athena-ai는 webpack alias로 매핑됨
+// @ts-expect-error - athena-ai는 webpack alias로 매핑됨
 import { AthenaOrchestrator } from 'athena-ai/core/orchestrator.js';
-// @ts-ignore
+// @ts-expect-error - webpack alias로 매핑됨
 import { WebSearchService } from 'athena-ai/utils/webSearch.js';
-// @ts-ignore
+// @ts-expect-error - webpack alias로 매핑됨
 import { initializeDatabase } from 'athena-ai/database/schema.js';
 
 const dbPath = process.env.ATHENA_DB_PATH || path.join(process.cwd(), 'athena-data', 'athena.db');
@@ -49,4 +49,3 @@ export function getOrchestrator(): AthenaOrchestrator {
 export function getWebSearch(): WebSearchService {
   return webSearch;
 }
-

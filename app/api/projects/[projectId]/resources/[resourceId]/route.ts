@@ -3,10 +3,10 @@ import { getOrchestrator } from '../../../../athena/utils';
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { projectId: string; resourceId: string } }
+  { params }: { params: Promise<{ projectId: string; resourceId: string }> }
 ) {
   try {
-    const { projectId, resourceId } = params;
+    const { projectId, resourceId } = await params;
 
     const orchestratorInstance = getOrchestrator();
     const db = orchestratorInstance.memory.db;
@@ -21,12 +21,12 @@ export async function DELETE(
       success: true,
       message: '자료가 삭제되었습니다.',
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Project resource deletion error:', error);
+    const message = error instanceof Error ? error.message : '서버 오류가 발생했습니다.';
     return NextResponse.json(
-      { success: false, error: error.message || '서버 오류가 발생했습니다.' },
+      { success: false, error: message },
       { status: 500 }
     );
   }
 }
-
