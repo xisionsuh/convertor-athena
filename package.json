@@ -1,0 +1,108 @@
+{
+  "name": "meeting-transcriber",
+  "version": "0.1.0",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "next dev -p 4000",
+    "build": "next build",
+    "start": "next start -p 4000",
+    "lint": "eslint app electron next.config.ts",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf .next dist node_modules/.cache",
+    "electron:dev": "concurrently \"cross-env BROWSER=none npm run dev\" \"wait-on http://localhost:4000 && electron .\"",
+    "electron:build": "npm run build && electron-builder --mac",
+    "electron:build:all": "npm run build && electron-builder --mac --win --linux",
+    "postinstall": "electron-builder install-app-deps",
+    "tauri:dev": "npm run dev & npx tauri dev",
+    "tauri:build": "npx tauri build"
+  },
+  "build": {
+    "appId": "com.meetingtranscriber.app",
+    "productName": "회의녹음변환기",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      ".next/standalone/**/*",
+      "public/**/*",
+      ".next/static/**/*",
+      "package.json",
+      ".env.local",
+      "!node_modules/@img/sharp-darwin-x64/**",
+      "!node_modules/@img/sharp-libvips-darwin-x64/**"
+    ],
+    "asar": false,
+    "mac": {
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "extraResources": []
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-code": "^2.0.55",
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
+    "@google/generative-ai": "^0.21.0",
+    "@octokit/rest": "^22.0.1",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "axios": "^1.7.9",
+    "better-sqlite3": "^11.7.0",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "googleapis": "^166.0.0",
+    "katex": "^0.16.25",
+    "multer": "^2.0.2",
+    "next": "15.5.6",
+    "nodemailer": "^7.0.10",
+    "openai": "^6.5.0",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "pdf-parse": "^1.1.1",
+    "puppeteer": "^24.29.1",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-markdown": "^10.1.0",
+    "react-syntax-highlighter": "^16.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "sharp": "^0.34.4",
+    "tesseract.js": "^6.0.1",
+    "uuid": "^11.0.3"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@tauri-apps/api": "^2.9.0",
+    "@tauri-apps/cli": "^2.9.1",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^38.5.0",
+    "electron-builder": "^26.0.12",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.6",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "wait-on": "^9.0.1"
+  }
+}
