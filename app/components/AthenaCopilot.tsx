@@ -388,19 +388,19 @@ export default function AthenaCopilot({
 
       <div className={`${isOpen ? 'flex-1' : 'w-0'} transition-all duration-300 bg-background/50 backdrop-blur-sm flex flex-col h-full relative`}>
         {/* Header */}
-        <div className="h-16 px-6 border-b border-border/50 flex items-center justify-between bg-background/80 backdrop-blur-md sticky top-0 z-10">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-gradient-to-br from-primary to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-primary/20">
-              <span className="text-white text-lg">🧠</span>
+        <div className="h-12 md:h-16 px-3 md:px-6 border-b border-border/50 flex items-center justify-between bg-background/80 backdrop-blur-md sticky top-0 z-10">
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className="w-7 h-7 md:w-9 md:h-9 bg-gradient-to-br from-primary to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-primary/20">
+              <span className="text-white text-sm md:text-lg">🧠</span>
             </div>
             <div>
-              <h2 className="text-sm font-bold text-foreground">Athena AI</h2>
-              <p className="text-xs text-muted-foreground">
-                {selectedProjectId && projectName ? `📁 ${projectName}` : 'Personal Assistant'}
+              <h2 className="text-xs md:text-sm font-bold text-foreground">Athena AI</h2>
+              <p className="text-[10px] md:text-xs text-muted-foreground truncate max-w-[120px] md:max-w-none">
+                {selectedProjectId && projectName ? `📁 ${projectName}` : 'Assistant'}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 md:gap-2">
             {selectedProjectId && (
               <button
                 onClick={async () => {
@@ -410,9 +410,10 @@ export default function AthenaCopilot({
                   showToast(`${projectName || 'Project'} chat started`, 'success');
                   onNewProjectChat?.(selectedProjectId);
                 }}
-                className="px-3 py-1.5 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 rounded-full transition-colors"
+                className="px-2 md:px-3 py-1 md:py-1.5 text-[10px] md:text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 rounded-full transition-colors"
               >
-                + New Chat
+                <span className="hidden sm:inline">+ New Chat</span>
+                <span className="sm:hidden">+</span>
               </button>
             )}
             <button
@@ -421,7 +422,7 @@ export default function AthenaCopilot({
                 setIsOpen(newIsOpen);
                 onOpenChange?.(newIsOpen);
               }}
-              className="p-2 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-muted"
+              className="p-1.5 md:p-2 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-muted hidden md:block"
             >
               {isOpen ? '◀' : '▶'}
             </button>
@@ -572,27 +573,27 @@ export default function AthenaCopilot({
             </div>
 
             {/* Input Area */}
-            <div className="p-4 bg-background/80 backdrop-blur-md border-t border-border/50">
+            <div className="p-2 md:p-4 bg-background/80 backdrop-blur-md border-t border-border/50">
               {/* Selected Files */}
               {selectedFiles.length > 0 && (
-                <div className="flex flex-wrap gap-2 mb-3 animate-fade-in">
+                <div className="flex flex-wrap gap-1 md:gap-2 mb-2 md:mb-3 animate-fade-in">
                   {selectedFiles.map((file, index) => (
-                    <div key={index} className="flex items-center gap-2 text-xs bg-muted px-3 py-1.5 rounded-full border border-border">
-                      <span className="text-lg">{file.type.startsWith('image/') ? '🖼️' : '📄'}</span>
-                      <span className="max-w-[150px] truncate font-medium">{file.name}</span>
-                      <button onClick={() => removeFile(index)} className="ml-1 text-muted-foreground hover:text-destructive transition-colors">×</button>
+                    <div key={index} className="flex items-center gap-1 md:gap-2 text-[10px] md:text-xs bg-muted px-2 md:px-3 py-1 md:py-1.5 rounded-full border border-border">
+                      <span className="text-sm md:text-lg">{file.type.startsWith('image/') ? '🖼️' : '📄'}</span>
+                      <span className="max-w-[80px] md:max-w-[150px] truncate font-medium">{file.name}</span>
+                      <button onClick={() => removeFile(index)} className="ml-0.5 md:ml-1 text-muted-foreground hover:text-destructive transition-colors">×</button>
                     </div>
                   ))}
                 </div>
               )}
 
-              <div className="relative flex items-end gap-2 bg-muted/50 border border-border/50 rounded-2xl p-2 shadow-sm focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/50 transition-all">
+              <div className="relative flex items-end gap-1 md:gap-2 bg-muted/50 border border-border/50 rounded-xl md:rounded-2xl p-1.5 md:p-2 shadow-sm focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/50 transition-all">
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="p-2 text-muted-foreground hover:text-primary hover:bg-background rounded-xl transition-colors"
+                  className="p-1.5 md:p-2 text-muted-foreground hover:text-primary hover:bg-background rounded-lg md:rounded-xl transition-colors"
                   title="Attach file"
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                  <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
                 </button>
 
                 <input
@@ -616,13 +617,13 @@ export default function AthenaCopilot({
                     }
                   }}
                   placeholder="Ask anything..."
-                  className="flex-1 bg-transparent border-none focus:ring-0 py-2.5 max-h-32 min-h-[44px] resize-none custom-scrollbar text-sm"
+                  className="flex-1 bg-transparent border-none focus:ring-0 py-2 md:py-2.5 max-h-24 md:max-h-32 min-h-[36px] md:min-h-[44px] resize-none custom-scrollbar text-sm"
                   rows={1}
                   style={{ height: 'auto' }}
                   onInput={(e) => {
                     const target = e.target as HTMLTextAreaElement;
                     target.style.height = 'auto';
-                    target.style.height = `${Math.min(target.scrollHeight, 128)}px`;
+                    target.style.height = `${Math.min(target.scrollHeight, 96)}px`;
                   }}
                   disabled={isLoading}
                 />
@@ -630,13 +631,13 @@ export default function AthenaCopilot({
                 <button
                   onClick={handleSend}
                   disabled={isLoading || (!input.trim() && selectedFiles.length === 0)}
-                  className="p-2 bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                  className="p-1.5 md:p-2 bg-primary text-primary-foreground rounded-lg md:rounded-xl hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                  <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
                 </button>
               </div>
-              <div className="text-center mt-2">
-                <p className="text-[10px] text-muted-foreground">AI can make mistakes. Check important info.</p>
+              <div className="text-center mt-1 md:mt-2">
+                <p className="text-[9px] md:text-[10px] text-muted-foreground">AI can make mistakes. Check important info.</p>
               </div>
             </div>
           </>

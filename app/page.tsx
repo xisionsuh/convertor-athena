@@ -1115,25 +1115,26 @@ export default function Home() {
 
       {/* Premium Top Bar */}
       {isMounted && (
-        <header className="h-16 glass z-40 flex items-center justify-between px-6 shrink-0 relative">
+        <header className="h-14 md:h-16 glass z-40 flex items-center justify-between px-3 md:px-6 shrink-0 relative">
           <div className="flex items-center gap-4 flex-1">
-            <div className="flex items-center gap-2 mr-4">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center shadow-lg shadow-primary/20">
-                <span className="text-white font-bold text-lg">A</span>
+            <div className="flex items-center gap-2 mr-2 md:mr-4">
+              <div className="w-7 h-7 md:w-8 md:h-8 rounded-xl bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center shadow-lg shadow-primary/20">
+                <span className="text-white font-bold text-base md:text-lg">A</span>
               </div>
-              <span className="font-bold text-lg tracking-tight hidden md:block">Athena</span>
+              <span className="font-bold text-base md:text-lg tracking-tight hidden sm:block">Athena</span>
             </div>
 
             {!isRecording ? (
-              <div className="flex items-center gap-3 animate-fade-in">
+              <div className="flex items-center gap-2 md:gap-3 animate-fade-in">
                 <button
                   onClick={startRecording}
                   disabled={isTranscribing || isCompressing}
-                  className="group relative overflow-hidden rounded-full bg-destructive/10 hover:bg-destructive/20 text-destructive px-5 py-2 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="group relative overflow-hidden rounded-full bg-destructive/10 hover:bg-destructive/20 text-destructive px-3 md:px-5 py-1.5 md:py-2 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <div className="flex items-center gap-2 relative z-10">
-                    <span className="w-2.5 h-2.5 rounded-full bg-destructive animate-pulse group-hover:scale-110 transition-transform" />
-                    <span className="font-medium text-sm">Start Recording</span>
+                  <div className="flex items-center gap-1.5 md:gap-2 relative z-10">
+                    <span className="w-2 h-2 md:w-2.5 md:h-2.5 rounded-full bg-destructive animate-pulse group-hover:scale-110 transition-transform" />
+                    <span className="font-medium text-xs md:text-sm">REC</span>
+                    <span className="font-medium text-xs md:text-sm hidden sm:inline">Start</span>
                   </div>
                 </button>
                 <span className="text-xs text-muted-foreground hidden lg:block">
@@ -1141,40 +1142,41 @@ export default function Home() {
                 </span>
               </div>
             ) : (
-              <div className="flex items-center gap-4 animate-fade-in bg-card/50 px-4 py-1.5 rounded-full border border-border/50">
-                <div className="flex items-center gap-3">
-                  <div className={`w-2.5 h-2.5 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-destructive animate-pulse'}`} />
-                  <span className="font-mono font-medium text-lg tabular-nums tracking-wider text-foreground">
+              <div className="flex items-center gap-2 md:gap-4 animate-fade-in bg-card/50 px-2 md:px-4 py-1 md:py-1.5 rounded-full border border-border/50">
+                <div className="flex items-center gap-2 md:gap-3">
+                  <div className={`w-2 h-2 md:w-2.5 md:h-2.5 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-destructive animate-pulse'}`} />
+                  <span className="font-mono font-medium text-sm md:text-lg tabular-nums tracking-wider text-foreground">
                     {formatRecordingTime(recordingTime)}
                   </span>
                 </div>
 
-                <div className="h-4 w-px bg-border" />
+                <div className="h-4 w-px bg-border hidden sm:block" />
 
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-0.5 md:gap-1">
                   <button
                     onClick={togglePauseRecording}
-                    className="p-2 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                    className="p-1.5 md:p-2 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                     title={isPaused ? "Resume" : "Pause"}
                   >
                     {isPaused ? '▶' : '⏸'}
                   </button>
                   <button
                     onClick={() => handleStopRecording(false)}
-                    className="p-2 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                    className="p-1.5 md:p-2 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                     title="Stop & Save"
                   >
                     ■
                   </button>
                   <button
                     onClick={() => handleStopRecording(true)}
-                    className="px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors shadow-sm"
+                    className="px-2 md:px-3 py-1 md:py-1.5 rounded-full bg-primary text-primary-foreground text-[10px] md:text-xs font-medium hover:bg-primary/90 transition-colors shadow-sm"
                   >
-                    Save & Transcribe
+                    <span className="hidden sm:inline">Save & Transcribe</span>
+                    <span className="sm:hidden">Save</span>
                   </button>
                   <button
                     onClick={cancelRecording}
-                    className="p-2 rounded-full hover:bg-muted text-muted-foreground hover:text-destructive transition-colors"
+                    className="p-1.5 md:p-2 rounded-full hover:bg-muted text-muted-foreground hover:text-destructive transition-colors"
                     title="Cancel"
                   >
                     ✕
@@ -1217,9 +1219,22 @@ export default function Home() {
       {/* 메인 레이아웃 */}
       <div className="flex flex-1 overflow-hidden">
 
-        {/* Sidebar */}
+        {/* Sidebar - 모바일에서는 오버레이 */}
         {isMounted && (
-          <div className={`${sidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 glass-panel flex flex-col relative z-30`}>
+          <>
+            {/* 모바일 오버레이 배경 */}
+            {sidebarOpen && (
+              <div
+                className="fixed inset-0 bg-black/50 z-40 md:hidden"
+                onClick={() => setSidebarOpen(false)}
+              />
+            )}
+            <div className={`
+              ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+              ${sidebarOpen ? 'md:w-80' : 'md:w-0'}
+              fixed md:relative inset-y-0 left-0 w-[85vw] max-w-[320px] md:max-w-none
+              transition-all duration-300 glass-panel flex flex-col z-50 md:z-30
+            `}>
             <div className="p-4 border-b border-border space-y-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Library</h2>
@@ -1608,14 +1623,19 @@ export default function Home() {
               )}
             </div>
           </div>
+          </>
         )}
 
         {/* Sidebar Toggle Button */}
         {isMounted && (
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="absolute top-1/2 -translate-y-1/2 z-20 bg-card border border-border shadow-md p-1.5 rounded-r-lg hover:bg-muted transition-all duration-300 text-muted-foreground hover:text-foreground"
-            style={{ left: sidebarOpen ? '320px' : '0px' }}
+            className={`
+              fixed md:absolute top-20 md:top-1/2 md:-translate-y-1/2 z-30 md:z-20
+              bg-card border border-border shadow-md p-2 md:p-1.5 rounded-r-lg
+              hover:bg-muted transition-all duration-300 text-muted-foreground hover:text-foreground
+              ${sidebarOpen ? 'left-[85vw] max-[320px]:left-[320px] md:left-[320px]' : 'left-0'}
+            `}
           >
             <svg className={`w-4 h-4 transition-transform duration-300 ${sidebarOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
