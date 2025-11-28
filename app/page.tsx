@@ -1110,13 +1110,23 @@ export default function Home() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-background text-foreground font-sans overflow-hidden selection:bg-primary/20 selection:text-primary" data-theme={theme}>
+    <div className="flex flex-col h-[100dvh] bg-background text-foreground font-sans overflow-hidden selection:bg-primary/20 selection:text-primary" data-theme={theme}>
       <ToastContainer toasts={toasts} />
 
       {/* Premium Top Bar */}
       {isMounted && (
         <header className="h-14 md:h-16 glass z-40 flex items-center justify-between px-3 md:px-6 shrink-0 relative">
           <div className="flex items-center gap-4 flex-1">
+            {/* Mobile Sidebar Toggle */}
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="md:hidden p-2 -ml-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
+              title="Menu"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
             <div className="flex items-center gap-2 mr-2 md:mr-4">
               <div className="w-7 h-7 md:w-8 md:h-8 rounded-xl bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center shadow-lg shadow-primary/20">
                 <span className="text-white font-bold text-base md:text-lg">A</span>
@@ -1217,7 +1227,7 @@ export default function Home() {
       )}
 
       {/* 메인 레이아웃 */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 min-h-0 overflow-hidden">
 
         {/* Sidebar - 모바일에서는 오버레이 */}
         {isMounted && (
@@ -1626,15 +1636,15 @@ export default function Home() {
           </>
         )}
 
-        {/* Sidebar Toggle Button */}
+        {/* Sidebar Toggle Button - Desktop only, positioned relative to sidebar */}
         {isMounted && (
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className={`
-              fixed md:absolute top-20 md:top-1/2 md:-translate-y-1/2 z-30 md:z-20
-              bg-card border border-border shadow-md p-2 md:p-1.5 rounded-r-lg
+              hidden md:block absolute top-1/2 -translate-y-1/2 z-20
+              bg-card border border-border shadow-md p-1.5 rounded-r-lg
               hover:bg-muted transition-all duration-300 text-muted-foreground hover:text-foreground
-              ${sidebarOpen ? 'left-[85vw] max-[320px]:left-[320px] md:left-[320px]' : 'left-0'}
+              ${sidebarOpen ? 'left-80' : 'left-0'}
             `}
           >
             <svg className={`w-4 h-4 transition-transform duration-300 ${sidebarOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1699,9 +1709,9 @@ export default function Home() {
               onCompositionEnd={handleCompositionEnd}
             />
 
-            {/* 파일 정보 패널 (선택 시에만 오른쪽에 표시) */}
+            {/* 파일 정보 패널 (선택 시에만 오른쪽에 표시) - 모바일에서는 숨김 */}
             {selectedSession && (
-              <div className="flex-1 flex flex-col bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700">
+              <div className="hidden md:flex flex-1 flex-col bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700">
                 {/* 파일 정보 패널 헤더 */}
                 <div className="p-4 border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-between">
                   <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">파일 정보</h2>

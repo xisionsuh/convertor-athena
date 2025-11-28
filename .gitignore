@@ -59,3 +59,4 @@ athena-data/*.db
 athena-data/*.db-shm
 athena-data/*.db-wal
 athena-data/*.backup
+ecosystem.config.js

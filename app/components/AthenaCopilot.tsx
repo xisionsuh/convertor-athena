@@ -386,7 +386,7 @@ export default function AthenaCopilot({
         </button>
       )}
 
-      <div className={`${isOpen ? 'flex-1' : 'w-0'} transition-all duration-300 bg-background/50 backdrop-blur-sm flex flex-col h-full relative`}>
+      <div className={`${isOpen ? 'flex-1' : 'w-0'} transition-all duration-300 bg-background/50 backdrop-blur-sm flex flex-col min-h-0 relative`}>
         {/* Header */}
         <div className="h-12 md:h-16 px-3 md:px-6 border-b border-border/50 flex items-center justify-between bg-background/80 backdrop-blur-md sticky top-0 z-10">
           <div className="flex items-center gap-2 md:gap-3">
@@ -573,7 +573,7 @@ export default function AthenaCopilot({
             </div>
 
             {/* Input Area */}
-            <div className="p-2 md:p-4 bg-background/80 backdrop-blur-md border-t border-border/50">
+            <div className="p-2 md:p-4 pb-[calc(0.5rem+env(safe-area-inset-bottom))] md:pb-4 bg-background/80 backdrop-blur-md border-t border-border/50 shrink-0">
               {/* Selected Files */}
               {selectedFiles.length > 0 && (
                 <div className="flex flex-wrap gap-1 md:gap-2 mb-2 md:mb-3 animate-fade-in">
