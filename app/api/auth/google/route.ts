@@ -34,7 +34,8 @@ export async function GET(request: NextRequest) {
     if (action === 'login') {
       // 구글 로그인 페이지로 리다이렉트
       const scope = 'profile email';
-      const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent`;
+      // prompt=select_account로 항상 계정 선택 화면 표시
+      const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=select_account`;
       
       console.log('🔗 구글 로그인 URL 생성:', googleAuthUrl.substring(0, 100) + '...');
       return NextResponse.redirect(googleAuthUrl);
@@ -124,13 +125,15 @@ export async function GET(request: NextRequest) {
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
         maxAge: 60 * 60 * 24 * 30, // 30일
+        path: '/athena', // basePath에 맞게 쿠키 경로 설정
       });
-      
+
       response.cookies.set('athena_user_name', name, {
         httpOnly: false, // 프론트엔드에서 읽을 수 있도록
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
         maxAge: 60 * 60 * 24 * 30,
+        path: '/athena', // basePath에 맞게 쿠키 경로 설정
       });
 
       return response;

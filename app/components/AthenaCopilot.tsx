@@ -9,6 +9,7 @@ import rehypeKatex from 'rehype-katex';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import 'katex/dist/katex.min.css';
+import { AthenaIcon } from './icons';
 
 interface Message {
   id: string;
@@ -78,7 +79,7 @@ export default function AthenaCopilot({
 
   const loadSessionMessages = useCallback(async (targetSessionId: string) => {
     try {
-      const response = await fetch(`/api/athena/session/${targetSessionId}`);
+      const response = await fetch(`/athena/api/athena/session/${targetSessionId}`);
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.messages) {
@@ -101,7 +102,7 @@ export default function AthenaCopilot({
         ? `${projectName} - 채팅`
         : '회의녹음변환기 코파일럿';
 
-      const response = await fetch('/api/athena/session/new', {
+      const response = await fetch('/athena/api/athena/session/new', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -251,7 +252,7 @@ export default function AthenaCopilot({
         formData.append('files', file);
       });
 
-      const response = await fetch('/api/athena/chat/stream', {
+      const response = await fetch('/athena/api/athena/chat/stream', {
         method: 'POST',
         body: formData,
         signal: abortControllerRef.current?.signal,
@@ -381,7 +382,7 @@ export default function AthenaCopilot({
           className="fixed left-4 top-1/2 -translate-y-1/2 bg-primary text-primary-foreground px-4 py-3 rounded-r-xl shadow-lg hover:bg-primary/90 transition-all z-50 flex items-center gap-2 animate-slide-in-right"
           title="Open Copilot"
         >
-          <span className="text-xl">🧠</span>
+          <AthenaIcon size={20} className="text-white" />
           <span className="font-semibold">Copilot</span>
         </button>
       )}
@@ -391,7 +392,7 @@ export default function AthenaCopilot({
         <div className="h-12 md:h-16 px-3 md:px-6 border-b border-border/50 flex items-center justify-between bg-background/80 backdrop-blur-md sticky top-0 z-10">
           <div className="flex items-center gap-2 md:gap-3">
             <div className="w-7 h-7 md:w-9 md:h-9 bg-gradient-to-br from-primary to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-primary/20">
-              <span className="text-white text-sm md:text-lg">🧠</span>
+              <AthenaIcon size={18} className="text-white" />
             </div>
             <div>
               <h2 className="text-xs md:text-sm font-bold text-foreground">Athena AI</h2>
@@ -455,7 +456,7 @@ export default function AthenaCopilot({
               {messages.length === 0 && (
                 <div className="h-full flex flex-col items-center justify-center text-center p-8 opacity-0 animate-fade-in" style={{ animationDelay: '0.2s', opacity: 1 }}>
                   <div className="w-16 h-16 bg-gradient-to-br from-primary/20 to-purple-500/20 rounded-2xl flex items-center justify-center mb-6">
-                    <span className="text-3xl">🧠</span>
+                    <AthenaIcon size={32} className="text-primary" />
                   </div>
                   <h3 className="text-xl font-bold text-foreground mb-2">How can I help you?</h3>
                   <p className="text-sm text-muted-foreground max-w-md">
@@ -609,8 +610,12 @@ export default function AthenaCopilot({
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onCompositionStart={() => { isComposingRef.current = true; }}
-                  onCompositionEnd={() => { isComposingRef.current = false; }}
+                  onCompositionEnd={() => {
+                    // 한글 IME 입력 완료 후 약간의 딜레이로 Enter 이벤트와의 충돌 방지
+                    setTimeout(() => { isComposingRef.current = false; }, 10);
+                  }}
                   onKeyDown={(e) => {
+                    // 한글 조합 중이면 무시 (IME 이벤트 충돌 방지)
                     if (e.key === 'Enter' && !e.shiftKey && !isComposingRef.current && !e.nativeEvent.isComposing) {
                       e.preventDefault();
                       handleSend();

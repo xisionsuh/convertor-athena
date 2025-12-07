@@ -6,9 +6,9 @@ export async function GET() {
     
     const response = NextResponse.redirect(`${BASE_URL}?logout=success`);
     
-    // 쿠키 삭제
-    response.cookies.delete('athena_user_id');
-    response.cookies.delete('athena_user_name');
+    // 쿠키 삭제 (path 지정 필요)
+    response.cookies.set('athena_user_id', '', { maxAge: 0, path: '/athena' });
+    response.cookies.set('athena_user_name', '', { maxAge: 0, path: '/athena' });
     
     return response;
   } catch (error: unknown) {

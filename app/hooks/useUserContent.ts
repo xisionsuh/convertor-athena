@@ -48,19 +48,20 @@ const toDate = (value: RawDate): Date => {
   return value instanceof Date ? value : new Date(value);
 };
 
-export function useUserContent(userId: string): UserContentState {
+export function useUserContent(userId: string, isAuthenticated: boolean = false): UserContentState {
   const [sessions, setSessions] = useState<FileSession[]>([]);
   const [memoSessions, setMemoSessions] = useState<MemoSession[]>([]);
   const [chatSessions, setChatSessions] = useState<MemoSession[]>([]);
 
   // DB와 localStorage에서 세션/메모 복원
   useEffect(() => {
-    if (!userId) return;
+    // 인증되지 않은 경우 데이터 로드하지 않음
+    if (!userId || !isAuthenticated) return;
 
     const loadContent = async () => {
       try {
         // DB 우선 로드
-        const response = await fetch(`/api/sessions?userId=${userId}`);
+        const response = await fetch(`/athena/api/sessions?userId=${userId}`);
         if (response.ok) {
           const data = await response.json() as {
             success: boolean;
@@ -148,11 +149,11 @@ export function useUserContent(userId: string): UserContentState {
     };
 
     loadContent();
-  }, [userId]);
+  }, [userId, isAuthenticated]);
 
   // 파일 세션 저장 (DB + localStorage)
   useEffect(() => {
-    if (!userId || sessions.length === 0) return;
+    if (!userId || !isAuthenticated || sessions.length === 0) return;
 
     const saveSessions = async () => {
       try {
@@ -165,7 +166,7 @@ export function useUserContent(userId: string): UserContentState {
               }
             : null;
 
-          await fetch('/api/sessions', {
+          await fetch('/athena/api/sessions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -211,16 +212,16 @@ export function useUserContent(userId: string): UserContentState {
     };
 
     saveSessions();
-  }, [sessions, userId]);
+  }, [sessions, userId, isAuthenticated]);
 
   // 메모 세션 저장 (DB + localStorage)
   useEffect(() => {
-    if (!userId || memoSessions.length === 0) return;
+    if (!userId || !isAuthenticated || memoSessions.length === 0) return;
 
     const saveMemos = async () => {
       try {
         for (const memo of memoSessions) {
-          await fetch('/api/sessions', {
+          await fetch('/athena/api/sessions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -246,7 +247,7 @@ export function useUserContent(userId: string): UserContentState {
     };
 
     saveMemos();
-  }, [memoSessions, userId]);
+  }, [memoSessions, userId, isAuthenticated]);
 
   return {
     sessions,

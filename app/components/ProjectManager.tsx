@@ -5,6 +5,7 @@ import type { Project, ProjectResource } from '../types';
 
 interface ProjectManagerProps {
   userId: string;
+  isAuthenticated: boolean;
   selectedProjectId: string | null;
   onSelectProject: (projectId: string | null) => void;
   showToast: (message: string, type: 'success' | 'info' | 'error') => void;
@@ -14,6 +15,7 @@ interface ProjectManagerProps {
 
 export default function ProjectManager({
   userId,
+  isAuthenticated,
   selectedProjectId,
   onSelectProject,
   showToast,
@@ -34,7 +36,7 @@ export default function ProjectManager({
   // 프로젝트 목록 로드
   const loadProjects = useCallback(async () => {
     try {
-      const response = await fetch(`/api/projects?userId=${userId}`);
+      const response = await fetch(`/athena/api/projects?userId=${userId}`);
       const data = await response.json();
       if (data.success) {
         setProjects(data.projects);
@@ -51,7 +53,7 @@ export default function ProjectManager({
   // 프로젝트 자료 개수 로드
   const loadResourceCount = async (projectId: string) => {
     try {
-      const response = await fetch(`/api/projects/${projectId}/resources`);
+      const response = await fetch(`/athena/api/projects/${projectId}/resources`);
       const data = await response.json();
       if (data.success) {
         setResourceCounts(prev => ({ ...prev, [projectId]: data.resources?.length || 0 }));
@@ -64,7 +66,7 @@ export default function ProjectManager({
   // 프로젝트 자료 목록 로드
   const loadProjectResources = useCallback(async (projectId: string) => {
     try {
-      const response = await fetch(`/api/projects/${projectId}/resources`);
+      const response = await fetch(`/athena/api/projects/${projectId}/resources`);
       const data = await response.json();
       if (data.success) {
         setProjectResources(prev => ({ ...prev, [projectId]: data.resources || [] }));
@@ -91,10 +93,12 @@ export default function ProjectManager({
   }, [loadProjectResources]);
 
   useEffect(() => {
-    if (userId) {
+    if (userId && isAuthenticated) {
       loadProjects();
+    } else {
+      setProjects([]); // 인증되지 않으면 프로젝트 초기화
     }
-  }, [userId, loadProjects]);
+  }, [userId, isAuthenticated, loadProjects]);
 
   // 외부 새로고침 트리거 - 펼쳐진 모든 프로젝트 새로고침
   useEffect(() => {
@@ -112,7 +116,7 @@ export default function ProjectManager({
     }
 
     try {
-      const response = await fetch('/api/projects', {
+      const response = await fetch('/athena/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -145,7 +149,7 @@ export default function ProjectManager({
     }
 
     try {
-      const response = await fetch(`/api/projects?projectId=${projectId}`, {
+      const response = await fetch(`/athena/api/projects?projectId=${projectId}`, {
         method: 'DELETE',
       });
 
@@ -186,7 +190,7 @@ export default function ProjectManager({
         formData.append('files', file);
       });
 
-      const response = await fetch(`/api/projects/${targetProjectId}/upload`, {
+      const response = await fetch(`/athena/api/projects/${targetProjectId}/upload`, {
         method: 'POST',
         body: formData,
       });
@@ -218,7 +222,7 @@ export default function ProjectManager({
 
   const deleteResource = async (resourceId: string, projectId: string) => {
     try {
-      const response = await fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
+      const response = await fetch(`/athena/api/projects/${projectId}/resources/${resourceId}`, {
         method: 'DELETE',
       });
 
@@ -274,7 +278,7 @@ export default function ProjectManager({
         // 자료 목록 및 개수 새로고침
         loadProjectResources(projectId);
       } else {
-        const response = await fetch(`/api/projects/${projectId}/resources`, {
+        const response = await fetch(`/athena/api/projects/${projectId}/resources`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

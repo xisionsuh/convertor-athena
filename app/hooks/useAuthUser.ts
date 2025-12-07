@@ -34,7 +34,7 @@ export function useAuthUser(): AuthState {
 
     const resolveUserId = async () => {
       try {
-        const response = await fetch('/api/auth/status');
+        const response = await fetch('/athena/api/auth/status');
         const data = await response.json();
 
         if (data.authenticated && data.user) {
@@ -51,7 +51,7 @@ export function useAuthUser(): AuthState {
       }
 
       try {
-        const latestResponse = await fetch('/api/sessions/latest-user');
+        const latestResponse = await fetch('/athena/api/sessions/latest-user');
         if (latestResponse.ok) {
           const latestData = await latestResponse.json();
           if (latestData.success && latestData.userId) {

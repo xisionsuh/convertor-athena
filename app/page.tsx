@@ -15,11 +15,13 @@ import { useUserContent } from './hooks/useUserContent';
 import { useRecording } from './hooks/useRecording';
 import SessionList from './components/SessionList';
 import MemoPanel from './components/MemoPanel';
+import { useExport } from './hooks/useExport';
 
 export default function Home() {
   const { theme } = useTheme(); // 테마 변경 시 리렌더링을 위해 추가
   const { userId, userName, isAuthenticated } = useAuthUser();
   const { toasts, showToast } = useToast();
+  const { exportToPDF, shareContent } = useExport();
   const {
     sessions,
     setSessions,
@@ -27,7 +29,7 @@ export default function Home() {
     setMemoSessions,
     chatSessions,
     setChatSessions,
-  } = useUserContent(userId);
+  } = useUserContent(userId, isAuthenticated);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]); // 다중 선택
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -85,10 +87,10 @@ export default function Home() {
     setIsMounted(true);
   }, []);
 
-  // 프로젝트 목록 불러오기
+  // 프로젝트 목록 불러오기 (인증된 경우에만)
   useEffect(() => {
-    if (userId) {
-      fetch(`/api/projects?userId=${userId}`)
+    if (userId && isAuthenticated) {
+      fetch(`/athena/api/projects?userId=${userId}`)
         .then(res => res.json())
         .then(data => {
           if (data.success) {
@@ -96,8 +98,10 @@ export default function Home() {
           }
         })
         .catch(console.error);
+    } else {
+      setProjects([]); // 인증되지 않으면 프로젝트 목록 초기화
     }
-  }, [userId, projectRefreshTrigger]);
+  }, [userId, isAuthenticated, projectRefreshTrigger]);
 
   const selectedSession = sessions.find(s => s.id === selectedSessionId);
 
@@ -161,7 +165,7 @@ export default function Home() {
     }
 
     try {
-      const response = await fetch(`/api/projects/${selectedProjectId}/resources`, {
+      const response = await fetch(`/athena/api/projects/${selectedProjectId}/resources`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -258,7 +262,7 @@ export default function Home() {
         const session = sessions.find(s => s.id === selectedSessionId);
         if (session && session.status !== 'transcribing') {
           // 삭제 로직 인라인 처리
-          fetch(`/api/sessions?sessionId=${selectedSessionId}&type=file`, { method: 'DELETE' }).catch(console.error);
+          fetch(`/athena/api/sessions?sessionId=${selectedSessionId}&type=file`, { method: 'DELETE' }).catch(console.error);
           setSessions(prev => prev.filter(s => s.id !== selectedSessionId));
           setSelectedSessionId(sessions.find(s => s.id !== selectedSessionId)?.id || null);
         }
@@ -421,7 +425,7 @@ export default function Home() {
     formData.append('file', fileToTranscribe);
 
     try {
-      const response = await fetch('/api/transcribe', {
+      const response = await fetch('/athena/api/transcribe', {
         method: 'POST',
         body: formData,
       });
@@ -573,7 +577,7 @@ export default function Home() {
         if (selectedProjectId && fullTranscription.trim()) {
           const session = sessions.find(s => s.id === sessionId);
           if (session) {
-            await fetch(`/api/projects/${selectedProjectId}/context`, {
+            await fetch(`/athena/api/projects/${selectedProjectId}/context`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -603,7 +607,7 @@ export default function Home() {
         if (selectedProjectId && text) {
           const session = sessions.find(s => s.id === sessionId);
           if (session) {
-            await fetch(`/api/projects/${selectedProjectId}/context`, {
+            await fetch(`/athena/api/projects/${selectedProjectId}/context`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -722,7 +726,7 @@ export default function Home() {
 
     setIsSummarizing(true);
     try {
-      const response = await fetch('/api/summarize', {
+      const response = await fetch('/athena/api/summarize', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -745,7 +749,7 @@ export default function Home() {
         if (selectedProjectId && data.minutes) {
           const session = sessions.find(s => s.id === selectedSessionId);
           if (session) {
-            await fetch(`/api/projects/${selectedProjectId}/context`, {
+            await fetch(`/athena/api/projects/${selectedProjectId}/context`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -802,7 +806,7 @@ export default function Home() {
 
     try {
       // DB에서도 삭제
-      await fetch(`/api/sessions?sessionId=${sessionId}&type=file`, {
+      await fetch(`/athena/api/sessions?sessionId=${sessionId}&type=file`, {
         method: 'DELETE',
       });
     } catch (error) {
@@ -877,7 +881,7 @@ export default function Home() {
 
     // 프로젝트 컨텍스트에 메모 내용 추가/업데이트
     if (selectedProjectId && memoContent) {
-      await fetch(`/api/projects/${selectedProjectId}/context`, {
+      await fetch(`/athena/api/projects/${selectedProjectId}/context`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -897,7 +901,7 @@ export default function Home() {
   const deleteChatSession = async (chatId: string) => {
     try {
       // API를 통해 채팅 세션 삭제
-      const response = await fetch(`/api/athena/session/${chatId}`, {
+      const response = await fetch(`/athena/api/athena/session/${chatId}`, {
         method: 'DELETE',
       });
       if (!response.ok) {
@@ -920,7 +924,7 @@ export default function Home() {
   const deleteMemo = async (memoId: string) => {
     try {
       // DB에서도 삭제
-      await fetch(`/api/sessions?sessionId=${memoId}&type=memo`, {
+      await fetch(`/athena/api/sessions?sessionId=${memoId}&type=memo`, {
         method: 'DELETE',
       });
     } catch (error) {
@@ -1076,13 +1080,13 @@ export default function Home() {
 
   // 구글 로그인 핸들러
   const handleGoogleLogin = () => {
-    window.location.href = '/api/auth/google?action=login';
+    window.location.href = '/athena/api/auth/google?action=login';
   };
 
   // 로그아웃 핸들러
   const handleLogout = async () => {
     try {
-      await fetch('/api/auth/logout');
+      await fetch('/athena/api/auth/logout');
       window.location.reload();
     } catch (error) {
       console.error('로그아웃 실패:', error);
@@ -1310,18 +1314,23 @@ export default function Home() {
                     </button>
                   </div>
                 ) : (
-                  <button
-                    onClick={handleGoogleLogin}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-primary hover:bg-primary/90 rounded-lg transition-all shadow-sm hover:shadow-md"
-                  >
-                    <svg className="w-4 h-4" viewBox="0 0 24 24">
-                      <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                      <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                      <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-                      <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-                    </svg>
-                    Sign in with Google
-                  </button>
+                  <>
+                    <button
+                      onClick={handleGoogleLogin}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-primary hover:bg-primary/90 rounded-lg transition-all shadow-sm hover:shadow-md"
+                    >
+                      <svg className="w-4 h-4" viewBox="0 0 24 24">
+                        <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                        <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                        <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                        <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                      </svg>
+                      Google로 시작하기
+                    </button>
+                    <p className="text-xs text-muted-foreground text-center mt-1">
+                      신규 사용자는 자동으로 계정이 생성됩니다
+                    </p>
+                  </>
                 )}
               </div>
 
@@ -1385,13 +1394,14 @@ export default function Home() {
                 <div className="animate-fade-in" style={{ animationDelay: '0.1s' }}>
                   <ProjectManager
                     userId={userId}
+                    isAuthenticated={isAuthenticated}
                     selectedProjectId={selectedProjectId}
                     onSelectProject={setSelectedProjectId}
                     showToast={showToast}
                     refreshTrigger={projectRefreshTrigger}
                     onAddResourceToProject={async (projectId, resourceType, resourceId, title, content) => {
                       try {
-                        const response = await fetch(`/api/projects/${projectId}/resources`, {
+                        const response = await fetch(`/athena/api/projects/${projectId}/resources`, {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
@@ -1834,6 +1844,43 @@ export default function Home() {
                             className="text-sm bg-gray-700 hover:bg-gray-800 text-white px-3 py-1.5 rounded font-medium transition-colors"
                           >
                             다운로드
+                          </button>
+                          <button
+                            onClick={async () => {
+                              const success = await exportToPDF({
+                                title: `회의록 - ${selectedSession.fileName}`,
+                                content: selectedSession.minutes,
+                                fileName: `회의록_${selectedSession.fileName.replace(/\.[^/.]+$/, '')}.pdf`
+                              });
+                              if (success) {
+                                showToast('PDF로 내보냈습니다.', 'success');
+                              } else {
+                                showToast('PDF 내보내기 실패', 'error');
+                              }
+                            }}
+                            className="text-sm bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded font-medium transition-colors flex items-center gap-1"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+                            PDF
+                          </button>
+                          <button
+                            onClick={async () => {
+                              const result = await shareContent({
+                                title: `회의록 - ${selectedSession.fileName}`,
+                                content: selectedSession.minutes
+                              });
+                              if (result.success) {
+                                if (result.method === 'clipboard') {
+                                  showToast('클립보드에 복사되었습니다.', 'success');
+                                } else {
+                                  showToast('공유되었습니다.', 'success');
+                                }
+                              }
+                            }}
+                            className="text-sm bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded font-medium transition-colors flex items-center gap-1"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+                            공유
                           </button>
                         </div>
                       </div>
