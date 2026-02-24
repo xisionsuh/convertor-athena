@@ -774,5 +774,103 @@ export function createRoutes(orchestrator, webSearch) {
     });
   }));
 
+  /**
+   * POST /api/command/:requestId/approve
+   * 위험 명령어 승인/거부
+   */
+  router.post('/command/:requestId/approve', asyncHandler(async (req, res) => {
+    const { requestId } = req.params;
+    const { approved, userId } = req.body;
+
+    const db = getDatabase();
+    const request = db.prepare('SELECT * FROM command_approvals WHERE id = ?').get(requestId);
+
+    if (!request) {
+      const error = new Error('승인 요청을 찾을 수 없습니다');
+      error.status = 404;
+      throw error;
+    }
+
+    if (request.status !== 'pending') {
+      const error = new Error('이미 처리된 요청입니다');
+      error.status = 400;
+      throw error;
+    }
+
+    if (!approved) {
+      db.prepare('UPDATE command_approvals SET status = ?, resolved_at = CURRENT_TIMESTAMP, resolved_by = ? WHERE id = ?')
+        .run('denied', userId || 'anonymous', requestId);
+      return res.json({ success: true, status: 'denied' });
+    }
+
+    // 승인 시 명령어 실행
+    const { execSync } = await import('child_process');
+    try {
+      const output = execSync(request.command, {
+        timeout: 30000, maxBuffer: 10 * 1024 * 1024, encoding: 'utf-8'
+      });
+      db.prepare('UPDATE command_approvals SET status = ?, resolved_at = CURRENT_TIMESTAMP, resolved_by = ?, result = ? WHERE id = ?')
+        .run('approved', userId || 'anonymous', output, requestId);
+      res.json({ success: true, status: 'approved', output });
+    } catch (execError) {
+      db.prepare('UPDATE command_approvals SET status = ?, resolved_at = CURRENT_TIMESTAMP, resolved_by = ?, error = ? WHERE id = ?')
+        .run('error', userId || 'anonymous', execError.message, requestId);
+      res.json({ success: false, status: 'error', error: execError.message });
+    }
+  }));
+
+  /**
+   * GET /api/command/pending
+   * 대기 중인 승인 요청 목록
+   */
+  router.get('/command/pending', asyncHandler(async (req, res) => {
+    const db = getDatabase();
+    const pending = db.prepare(
+      'SELECT * FROM command_approvals WHERE status = ? ORDER BY requested_at DESC'
+    ).all('pending');
+    res.json({ success: true, requests: pending });
+  }));
+
+  /**
+   * GET /api/system/status
+   * 서버 시스템 상태 조회
+   */
+  router.get('/system/status', asyncHandler(async (req, res) => {
+    const os = await import('os');
+    const { execSync } = await import('child_process');
+
+    const cpus = os.cpus();
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+
+    let diskInfo = '';
+    try { diskInfo = execSync('df -h /', { encoding: 'utf-8', timeout: 5000 }); } catch (e) { /* ignore */ }
+
+    let pm2List = [];
+    try {
+      const pm2Output = execSync('pm2 jlist', { encoding: 'utf-8', timeout: 10000 });
+      pm2List = JSON.parse(pm2Output).map(p => ({
+        name: p.name, id: p.pm_id, status: p.pm2_env?.status,
+        cpu: p.monit?.cpu, memory: p.monit?.memory, uptime: p.pm2_env?.pm_uptime
+      }));
+    } catch (e) { /* ignore */ }
+
+    res.json({
+      success: true,
+      system: {
+        hostname: os.hostname(),
+        platform: os.platform(),
+        uptime: os.uptime(),
+        cpu: { model: cpus[0]?.model, cores: cpus.length, loadAvg: os.loadavg() },
+        memory: {
+          total: totalMem, free: freeMem, used: totalMem - freeMem,
+          usagePercent: ((totalMem - freeMem) / totalMem * 100).toFixed(1)
+        },
+        disk: diskInfo.trim(),
+        processes: pm2List
+      }
+    });
+  }));
+
   return router;
 }

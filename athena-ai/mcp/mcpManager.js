@@ -29,6 +29,12 @@ import { createUserSettingsTools } from './tools/userSettings.js';
 import { createSchedulerTools } from './tools/scheduler.js';
 import { createFeedbackLearningTools } from './tools/feedbackLearning.js';
 import { createCollaborationTools } from './tools/collaboration.js';
+import { createRemoteDeviceTools } from './tools/remoteDevice.js';
+import { createSystemExecTool } from './tools/systemExec.js';
+import { createScreenCaptureTool } from './tools/screenCapture.js';
+import { createProcessManagerTool } from './tools/processManager.js';
+import { createSystemMonitorTool } from './tools/systemMonitor.js';
+import { createSelfMemoryTool } from './tools/selfMemory.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -40,7 +46,11 @@ export class MCPManager extends MCPBase {
     this.workspaceRoot = options.workspaceRoot;
     this.enabled = options.enabled !== false; // 기본값: true
     this.dbPath = options.dbPath; // 데이터베이스 경로 저장
-    
+    this.nodeServer = options.nodeServer || null;
+    this.remoteCommandManager = options.remoteCommandManager || null;
+    this.pairingManager = options.pairingManager || null;
+    this.workspaceMemory = options.workspaceMemory || null;
+
     if (this.enabled) {
       this.initializeTools();
     }
@@ -312,6 +322,64 @@ export class MCPManager extends MCPBase {
         });
       } catch (error) {
         logger.warn('Collaboration tools not available', { error: error.message });
+      }
+
+      // 시스템 명령어 실행 도구 등록
+      try {
+        const systemExecTool = createSystemExecTool({ dbPath: this.dbPath });
+        this.registerTool(systemExecTool);
+      } catch (error) {
+        logger.warn('System exec tool not available', { error: error.message });
+      }
+
+      // 스크린 캡처 + OCR 도구 등록
+      try {
+        const screenCaptureTool = createScreenCaptureTool({ workspaceRoot: this.workspaceRoot });
+        this.registerTool(screenCaptureTool);
+      } catch (error) {
+        logger.warn('Screen capture tool not available', { error: error.message });
+      }
+
+      // PM2 프로세스 관리 도구 등록
+      try {
+        const processManagerTool = createProcessManagerTool();
+        this.registerTool(processManagerTool);
+      } catch (error) {
+        logger.warn('Process manager tool not available', { error: error.message });
+      }
+
+      // 시스템 모니터링 도구 등록
+      try {
+        const systemMonitorTool = createSystemMonitorTool({ sampleMs: 100 });
+        this.registerTool(systemMonitorTool);
+      } catch (error) {
+        logger.warn('System monitor tool not available', { error: error.message });
+      }
+
+      // 원격 디바이스 제어 도구 등록
+      try {
+        const remoteDeviceTools = createRemoteDeviceTools({
+          nodeServer: this.nodeServer,
+          remoteCommandManager: this.remoteCommandManager,
+          pairingManager: this.pairingManager
+        });
+        remoteDeviceTools.forEach(tool => {
+          this.registerTool(tool);
+        });
+      } catch (error) {
+        logger.warn('Remote device tools not available', { error: error.message });
+      }
+
+      // AI 자기 메모리/아이덴티티 편집 도구 등록
+      if (this.workspaceMemory) {
+        try {
+          const selfMemoryTool = createSelfMemoryTool({
+            workspaceMemory: this.workspaceMemory
+          });
+          this.registerTool(selfMemoryTool);
+        } catch (error) {
+          logger.warn('Self memory tool not available', { error: error.message });
+        }
       }
 
       logger.info('MCP tools initialized', {

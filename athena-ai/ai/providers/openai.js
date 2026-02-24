@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import { AIProvider } from './base.js';
 
 export class OpenAIProvider extends AIProvider {
-  constructor(apiKey, model = 'gpt-5') {
+  constructor(apiKey, model = 'gpt-4o') {
     super('ChatGPT', apiKey);
     this.client = new OpenAI({ apiKey });
     this.model = model;

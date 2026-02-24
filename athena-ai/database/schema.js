@@ -280,6 +280,34 @@ export function initializeDatabase(dbPath = './data/athena.db') {
     )
   `);
 
+  // 명령어 승인 테이블 (위험 명령 승인/거부 추적)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS command_approvals (
+      id TEXT PRIMARY KEY,
+      command TEXT NOT NULL,
+      security_level TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      resolved_at DATETIME,
+      resolved_by TEXT,
+      result TEXT,
+      error TEXT
+    )
+  `);
+
+  // 페어링된 디바이스 테이블
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS paired_devices (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      platform TEXT,
+      token TEXT UNIQUE NOT NULL,
+      capabilities TEXT,
+      last_seen DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // 인덱스 생성
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_short_term_session ON short_term_memory(session_id);
@@ -296,6 +324,8 @@ export function initializeDatabase(dbPath = './data/athena.db') {
     CREATE INDEX IF NOT EXISTS idx_search_summary_query ON search_summary_cache(query);
     CREATE INDEX IF NOT EXISTS idx_debate_feedback_session ON debate_feedback(session_id);
     CREATE INDEX IF NOT EXISTS idx_voting_feedback_session ON voting_feedback(session_id);
+    CREATE INDEX IF NOT EXISTS idx_command_approvals_status ON command_approvals(status);
+    CREATE INDEX IF NOT EXISTS idx_paired_devices_token ON paired_devices(token);
     CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id);
     CREATE INDEX IF NOT EXISTS idx_project_resources_project ON project_resources(project_id);
     CREATE INDEX IF NOT EXISTS idx_project_resources_type ON project_resources(resource_type);
@@ -305,6 +335,7 @@ export function initializeDatabase(dbPath = './data/athena.db') {
     CREATE INDEX IF NOT EXISTS idx_file_sessions_project ON file_sessions(project_id);
     CREATE INDEX IF NOT EXISTS idx_memo_sessions_user ON memo_sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_memo_sessions_project ON memo_sessions(project_id);
+    CREATE INDEX IF NOT EXISTS idx_paired_devices_token ON paired_devices(token);
   `);
 
   return db;

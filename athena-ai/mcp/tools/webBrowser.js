@@ -19,7 +19,7 @@ let pageInstance = null;
 /**
  * 브라우저 인스턴스 가져오기 (싱글톤)
  */
-async function getBrowser() {
+export async function getBrowser() {
   if (!browserInstance) {
     browserInstance = await puppeteer.launch({
       headless: true,
@@ -323,4 +323,3 @@ export function createWebBrowserTool(options = {}) {
 export async function cleanupBrowser() {
   await closeBrowser();
 }
-
