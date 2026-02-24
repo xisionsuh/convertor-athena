@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { AIProvider } from './base.js';
 
 export class ClaudeProvider extends AIProvider {
-  constructor(apiKey, model = 'claude-3-sonnet-20240229') {
+  constructor(apiKey, model = 'claude-sonnet-4-6') {
     super('Claude', apiKey);
     this.client = new Anthropic({ apiKey });
     this.model = model;
