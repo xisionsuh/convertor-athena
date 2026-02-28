@@ -1,10 +1,30 @@
 /**
  * MessageHandler - 텔레그램 명령어 + 자연어 라우팅
  * /start, /status, /pm2, /screenshot, /memory, /remember, /identity, /alert
+ * /approve, /deny, /pending, /schedule
  * 그 외 자연어 → orchestrator.processStream()
  */
 
 import { logger } from '../utils/logger.js';
+
+// Shell injection sanitizer: remove dangerous characters from user input
+function sanitizeShellArg(str) {
+  if (!str) return '';
+  // Remove shell metacharacters: $, `, ;, |, &, (, ), {, }, <, >, \n, \r
+  return str.replace(/[\$`;\|&\(\)\{\}<>\n\r]/g, '').trim();
+}
+
+// SQL parameter sanitizer: only allow alphanumeric, space, dash, underscore, dot
+function sanitizeSqlLiteral(str) {
+  if (!str) return '';
+  return str.replace(/[^a-zA-Z0-9\s\-_\.]/g, '').trim();
+}
+
+// Valid Oracle collector names (whitelist)
+const VALID_COLLECTORS = [
+  'money_flow', 'market_data', 'crypto_flow', 'macro_intel', 'sentiment',
+  'institutional', 'korea_market', 'guru_tracker', 'technical_data', 'fundamentals'
+];
 
 export class MessageHandler {
   constructor(options = {}) {
@@ -90,6 +110,17 @@ export class MessageHandler {
           return this._cmdDeploy(chatId, argStr);
         case '/oracle':
           return this._cmdOracle(chatId, argStr);
+        case '/approve':
+          return this._cmdApprove(chatId, argStr);
+        case '/deny':
+          return this._cmdDeny(chatId, argStr);
+        case '/schedule':
+          return this._cmdSchedule(chatId, argStr);
+        case '/pending':
+          return this._cmdPending(chatId);
+        case '/credentials':
+        case '/creds':
+          return this._cmdCredentials(chatId, argStr);
         default:
           // Unknown command → treat as natural language
           return this._handleNaturalLanguage(chatId, text);
@@ -117,6 +148,12 @@ export class MessageHandler {
 /ls [path] - 디렉토리 | /search <query> [path] - 검색
 /db <SQL> [db] - DB 쿼리 | /log <name> [줄수] - 로그
 /restart <name> - 재시작 | /deploy <project> - 배포
+
+*승인 & 스케줄:*
+/pending - 대기 중인 승인 요청 목록
+/approve <id> - 명령 승인 + 실행
+/deny <id> - 명령 거부
+/schedule list|run|toggle|delete - 스케줄 관리
 
 *Oracle 금융분석:*
 /oracle - 상태 | /oracle market - 시장 현황
@@ -310,6 +347,15 @@ Total: ${diskTotal} | Used: ${diskUsed} (${diskPct}) | Avail: ${diskAvail}`;
 /restart <name> - PM2 프로세스 재시작
 /deploy <project> - git pull + build + restart
 
+*승인 & 스케줄:*
+/pending - 대기 중인 승인 요청 목록
+/approve <id> - DANGEROUS 명령 승인 + 실행
+/deny <id> - 명령 거부
+/schedule list - 예약 작업 목록
+/schedule run <id> - 즉시 실행
+/schedule toggle <id> - 활성/비활성 전환
+/schedule delete <id> - 예약 삭제
+
 *Oracle 금융분석:*
 /oracle - Oracle 시스템 상태
 /oracle market - 시장 레짐 + 주요 지표
@@ -318,6 +364,10 @@ Total: ${diskTotal} | Used: ${diskUsed} (${diskPct}) | Avail: ${diskAvail}`;
 /oracle report [type] - 리포트 (daily/weekly/guru/ta)
 /oracle collect [name] - 데이터 수집 트리거
 /oracle analyze - AI 분석 실행
+
+*보안 & 모니터링:*
+/credentials - API 키 상태 (활성/쿨다운/비활성)
+/creds reset <name> - 키 상태 수동 리셋
 
 *자연어 & 멀티 AI:*
 명령어 없이 자유롭게 대화하면 AI가 답변합니다.
@@ -373,7 +423,7 @@ Total: ${diskTotal} | Used: ${diskUsed} (${diskPct}) | Avail: ${diskAvail}`;
     try {
       const result = this._unwrapToolResult(
         await this.orchestrator.mcpManager.executeTool('system_exec', {
-          command: `cat "${filePath}" | head -200`
+          command: `cat "${sanitizeShellArg(filePath)}" | head -200`
         })
       );
       if (result.success) {
@@ -393,7 +443,7 @@ Total: ${diskTotal} | Used: ${diskUsed} (${diskPct}) | Avail: ${diskAvail}`;
     try {
       const result = this._unwrapToolResult(
         await this.orchestrator.mcpManager.executeTool('system_exec', {
-          command: `ls -la "${target}"`
+          command: `ls -la "${sanitizeShellArg(target)}"`
         })
       );
       if (result.success) {
@@ -427,7 +477,7 @@ Total: ${diskTotal} | Used: ${diskUsed} (${diskPct}) | Avail: ${diskAvail}`;
     try {
       const result = this._unwrapToolResult(
         await this.orchestrator.mcpManager.executeTool('system_exec', {
-          command: `grep -rl "${query}" "${searchPath}" --include="*.py" --include="*.js" --include="*.json" --include="*.md" | head -30`
+          command: `grep -rl "${sanitizeShellArg(query)}" "${sanitizeShellArg(searchPath)}" --include="*.py" --include="*.js" --include="*.json" --include="*.md" | head -30`
         })
       );
       if (result.success) {
@@ -497,7 +547,7 @@ Total: ${diskTotal} | Used: ${diskUsed} (${diskPct}) | Avail: ${diskAvail}`;
         // Fallback to system_exec
         const fallback = this._unwrapToolResult(
           await this.orchestrator.mcpManager.executeTool('system_exec', {
-            command: `pm2 logs ${name} --nostream --lines ${lines}`
+            command: `pm2 logs "${sanitizeShellArg(name)}" --nostream --lines ${lines}`
           })
         );
         if (fallback.success) {
@@ -598,87 +648,75 @@ Total: ${diskTotal} | Used: ${diskUsed} (${diskPct}) | Avail: ${diskAvail}`;
     }
   }
 
-  // ─── Oracle Commands ──────────────────────────────────
+  // ─── Oracle Commands (OracleClient 기반) ──────────────
+
+  _getOracleClient() {
+    return this.orchestrator.oracleClient;
+  }
 
   async _cmdOracle(chatId, argStr) {
-    const ORACLE_DB = '/home/ubuntu/oracle/data/oracle.db';
-    const ORACLE_DIR = '/home/ubuntu/oracle';
-    const ORACLE_VENV = '/home/ubuntu/oracle/venv/bin/python';
-
     const parts = argStr ? argStr.split(/\s+/) : [];
     const subCmd = (parts[0] || '').toLowerCase();
     const subArg = parts.slice(1).join(' ');
 
     switch (subCmd) {
-      case 'collect':  return this._oracleCollect(chatId, subArg, ORACLE_DIR, ORACLE_VENV);
-      case 'analyze':  return this._oracleAnalyze(chatId, ORACLE_DIR, ORACLE_VENV);
-      case 'report':   return this._oracleReport(chatId, subArg, ORACLE_DIR);
-      case 'market':   return this._oracleMarket(chatId, ORACLE_DB);
-      case 'guru':     return this._oracleGuru(chatId, subArg, ORACLE_DB);
-      case 'ta':       return this._oracleTa(chatId, subArg, ORACLE_DB);
-      default:         return this._oracleStatus(chatId, ORACLE_DB, ORACLE_DIR);
+      case 'collect':  return this._oracleCollect(chatId, subArg);
+      case 'analyze':  return this._oracleAnalyze(chatId);
+      case 'report':   return this._oracleReport(chatId, subArg);
+      case 'market':   return this._oracleMarket(chatId);
+      case 'guru':     return this._oracleGuru(chatId, subArg);
+      case 'ta':       return this._oracleTa(chatId, subArg);
+      case 'health':   return this._oracleHealth(chatId);
+      default:         return this._oracleStatus(chatId);
     }
   }
 
-  async _oracleStatus(chatId, dbPath, oracleDir) {
+  async _oracleStatus(chatId) {
     await this.bot.sendTyping(chatId);
     try {
-      // Parallel: state.json + DB stats + PM2 status
-      const [stateRaw, dbRaw, pm2Raw] = await Promise.allSettled([
-        this.orchestrator.mcpManager.executeTool('system_exec', {
-          command: `cat "${oracleDir}/data/state.json" 2>/dev/null || echo "{}"`
-        }),
-        this.orchestrator.mcpManager.executeTool('query_database', {
-          query: `SELECT
-            (SELECT count(*) FROM market_data) as market_data,
-            (SELECT count(*) FROM regimes) as regimes,
-            (SELECT count(*) FROM guru_holdings) as guru_holdings,
-            (SELECT count(*) FROM technical_analysis) as technical_analysis,
-            (SELECT count(*) FROM news_sentiment) as news_sentiment,
-            (SELECT count(*) FROM analyses) as analyses`,
-          database_path: dbPath
-        }),
+      const oc = this._getOracleClient();
+      const [status, health, pm2Raw] = await Promise.allSettled([
+        oc.getStatus(),
+        oc.getHealth(),
         this.orchestrator.mcpManager.executeTool('process_manager', { action: 'list' })
       ]);
-      const stateResult = stateRaw.status === 'fulfilled' ? { status: 'fulfilled', value: this._unwrapToolResult(stateRaw.value) } : stateRaw;
-      const dbResult = dbRaw.status === 'fulfilled' ? { status: 'fulfilled', value: this._unwrapToolResult(dbRaw.value) } : dbRaw;
-      const pm2Result = pm2Raw.status === 'fulfilled' ? { status: 'fulfilled', value: this._unwrapToolResult(pm2Raw.value) } : pm2Raw;
 
       let msg = '*Oracle 2.0 상태*\n';
 
-      // State info
-      if (stateResult.status === 'fulfilled' && stateResult.value?.success) {
-        try {
-          const state = JSON.parse(stateResult.value.output);
-          const collectors = state.collectors || {};
-          msg += '\n*수집기 상태:*';
-          for (const [name, info] of Object.entries(collectors)) {
-            const ago = info.last_run ? this._timeAgo(info.last_run) : 'never';
-            msg += `\n  ${name}: ${ago}`;
-          }
-        } catch { msg += '\n수집기 상태: 파싱 불가'; }
+      // API health
+      const h = health.status === 'fulfilled' ? health.value : null;
+      if (h?.uptime_seconds) {
+        msg += `\n*API:* 가동 중 (${Math.floor(h.uptime_seconds / 3600)}h)`;
+        if (h.db_size_mb) msg += `, DB: ${h.db_size_mb}MB`;
+      } else {
+        msg += '\n*API:* 직접 DB 모드 (REST 미가동)';
       }
 
-      // DB stats
-      if (dbResult.status === 'fulfilled' && dbResult.value?.success) {
-        const row = dbResult.value.rows?.[0];
-        if (row) {
-          msg += '\n\n*DB 레코드:*';
-          for (const [key, val] of Object.entries(row)) {
-            msg += `\n  ${key}: ${val?.toLocaleString() || 0}`;
+      // State info
+      const state = status.status === 'fulfilled' ? status.value : null;
+      if (state && typeof state === 'object') {
+        const entries = state.collectors || state;
+        if (typeof entries === 'object') {
+          msg += '\n\n*수집기 상태:*';
+          for (const [name, val] of Object.entries(entries)) {
+            const lastRun = typeof val === 'string' ? val : val?.last_run;
+            msg += `\n  ${name}: ${lastRun ? this._timeAgo(lastRun) : 'never'}`;
           }
         }
       }
 
       // PM2
-      if (pm2Result.status === 'fulfilled' && pm2Result.value?.success) {
-        const procs = pm2Result.value.processes || [];
+      const pm2Result = pm2Raw.status === 'fulfilled' ? this._unwrapToolResult(pm2Raw.value) : null;
+      if (pm2Result?.success) {
+        const procs = pm2Result.processes || [];
         const oracle = procs.find(p => (p.name || p.pm2_env?.name) === 'oracle');
         const dash = procs.find(p => (p.name || p.pm2_env?.name) === 'oracle-dashboard');
-        if (oracle || dash) {
+        const api = procs.find(p => (p.name || p.pm2_env?.name) === 'oracle-api');
+        if (oracle || dash || api) {
           msg += '\n\n*PM2:*';
           if (oracle) msg += `\n  oracle: ${oracle.pm2_env?.status || oracle.status || '?'}`;
           if (dash) msg += `\n  dashboard: ${dash.pm2_env?.status || dash.status || '?'}`;
+          if (api) msg += `\n  api: ${api.pm2_env?.status || api.status || '?'}`;
         }
       }
 
@@ -688,71 +726,44 @@ Total: ${diskTotal} | Used: ${diskUsed} (${diskPct}) | Avail: ${diskAvail}`;
     }
   }
 
-  async _oracleCollect(chatId, collectorName, oracleDir, venvPython) {
-    await this.bot.sendMessage(chatId, `🔄 Oracle 수집 시작${collectorName ? `: ${collectorName}` : ' (전체)'}...`);
+  async _oracleCollect(chatId, collectorName) {
+    if (collectorName) {
+      const safeName = sanitizeSqlLiteral(collectorName);
+      if (!VALID_COLLECTORS.includes(safeName)) {
+        await this.bot.sendMessage(chatId, `잘못된 수집기: ${safeName}\n\n사용 가능: ${VALID_COLLECTORS.join(', ')}`);
+        return;
+      }
+    }
+    await this.bot.sendMessage(chatId, `Oracle 수집 시작${collectorName ? `: ${collectorName}` : ' (전체)'}...`);
     await this.bot.sendTyping(chatId);
     try {
-      const cmd = collectorName
-        ? `${venvPython} -c "from collectors import ${collectorName}; ${collectorName}.collect()"`
-        : `${venvPython} main.py --collect-only`;
-      const result = this._unwrapToolResult(
-        await this.orchestrator.mcpManager.executeTool('system_exec', {
-          command: cmd,
-          cwd: oracleDir
-        })
-      );
-      if (result.success) {
-        await this.bot.sendMessage(chatId, `✅ 수집 완료\n\n\`\`\`\n${(result.output || '').substring(0, 3000)}\n\`\`\``);
-      } else {
-        await this.bot.sendMessage(chatId, `수집 실패: ${(result.error || '').substring(0, 1000)}`);
-      }
+      const result = await this._getOracleClient().triggerCollect(collectorName || null);
+      const output = result?.output || result?.message || JSON.stringify(result);
+      await this.bot.sendMessage(chatId, `수집 완료\n\n\`\`\`\n${String(output).substring(0, 3000)}\n\`\`\``);
     } catch (error) {
-      await this.bot.sendMessage(chatId, `오류: ${error.message}`);
+      await this.bot.sendMessage(chatId, `수집 실패: ${error.message}`);
     }
   }
 
-  async _oracleAnalyze(chatId, oracleDir, venvPython) {
-    await this.bot.sendMessage(chatId, '🧠 Oracle AI 분석 시작...');
+  async _oracleAnalyze(chatId) {
+    await this.bot.sendMessage(chatId, 'Oracle AI 분석 시작...');
     await this.bot.sendTyping(chatId);
     try {
-      const result = this._unwrapToolResult(
-        await this.orchestrator.mcpManager.executeTool('system_exec', {
-          command: `${venvPython} main.py --analyze-only`,
-          cwd: oracleDir
-        })
-      );
-      if (result.success) {
-        await this.bot.sendMessage(chatId, `✅ 분석 완료\n\n\`\`\`\n${(result.output || '').substring(0, 3000)}\n\`\`\``);
-      } else {
-        await this.bot.sendMessage(chatId, `분석 실패: ${(result.error || '').substring(0, 1000)}`);
-      }
+      const result = await this._getOracleClient().triggerAnalyze();
+      const output = result?.output || result?.message || JSON.stringify(result);
+      await this.bot.sendMessage(chatId, `분석 완료\n\n\`\`\`\n${String(output).substring(0, 3000)}\n\`\`\``);
     } catch (error) {
-      await this.bot.sendMessage(chatId, `오류: ${error.message}`);
+      await this.bot.sendMessage(chatId, `분석 실패: ${error.message}`);
     }
   }
 
-  async _oracleReport(chatId, reportType, oracleDir) {
+  async _oracleReport(chatId, reportType) {
     const type = reportType || 'daily';
     await this.bot.sendTyping(chatId);
     try {
-      // Find latest report of this type
-      const result = this._unwrapToolResult(
-        await this.orchestrator.mcpManager.executeTool('system_exec', {
-          command: `ls -t "${oracleDir}/reports/"*${type}* 2>/dev/null | head -1`
-        })
-      );
-      if (result.success && result.output?.trim()) {
-        const filePath = result.output.trim();
-        const content = this._unwrapToolResult(
-          await this.orchestrator.mcpManager.executeTool('system_exec', {
-            command: `cat "${filePath}" | head -200`
-          })
-        );
-        if (content.success) {
-          await this.bot.sendMessage(chatId, `*Oracle 리포트: ${type}*\n\n${(content.output || '').substring(0, 3500)}`);
-        } else {
-          await this.bot.sendMessage(chatId, `리포트 읽기 실패: ${content.error}`);
-        }
+      const report = await this._getOracleClient().getReport(type);
+      if (report?.content) {
+        await this.bot.sendMessage(chatId, `*Oracle 리포트: ${type}*\n\n${report.content.substring(0, 3500)}`);
       } else {
         await this.bot.sendMessage(chatId, `'${type}' 리포트를 찾을 수 없습니다.\n\n사용 가능: daily, weekly, guru, ta, valuation`);
       }
@@ -761,58 +772,39 @@ Total: ${diskTotal} | Used: ${diskUsed} (${diskPct}) | Avail: ${diskAvail}`;
     }
   }
 
-  async _oracleMarket(chatId, dbPath) {
+  async _oracleMarket(chatId) {
     await this.bot.sendTyping(chatId);
     try {
-      const [regimeRaw, marketRaw, analysisRaw] = await Promise.allSettled([
-        this.orchestrator.mcpManager.executeTool('query_database', {
-          query: `SELECT regime, confidence, timestamp FROM regimes ORDER BY timestamp DESC LIMIT 1`,
-          database_path: dbPath
-        }),
-        this.orchestrator.mcpManager.executeTool('query_database', {
-          query: `SELECT symbol, price, change_1d, timestamp FROM market_data ORDER BY timestamp DESC LIMIT 10`,
-          database_path: dbPath
-        }),
-        this.orchestrator.mcpManager.executeTool('query_database', {
-          query: `SELECT type, summary, timestamp FROM analyses ORDER BY timestamp DESC LIMIT 3`,
-          database_path: dbPath
-        })
+      const oc = this._getOracleClient();
+      const [regime, market, ta] = await Promise.allSettled([
+        oc.getMarketRegime(),
+        oc.getMarketData(10),
+        oc.getTechnicalSignals()
       ]);
-      const regimeResult = regimeRaw.status === 'fulfilled' ? { status: 'fulfilled', value: this._unwrapToolResult(regimeRaw.value) } : regimeRaw;
-      const marketResult = marketRaw.status === 'fulfilled' ? { status: 'fulfilled', value: this._unwrapToolResult(marketRaw.value) } : marketRaw;
-      const analysisResult = analysisRaw.status === 'fulfilled' ? { status: 'fulfilled', value: this._unwrapToolResult(analysisRaw.value) } : analysisRaw;
 
       let msg = '*Oracle Market Overview*\n';
 
-      // Regime
-      if (regimeResult.status === 'fulfilled' && regimeResult.value?.success) {
-        const r = regimeResult.value.rows?.[0];
-        if (r) {
-          msg += `\n*시장 레짐:* ${r.regime} (신뢰도: ${r.confidence ? (r.confidence * 100).toFixed(0) + '%' : '?'})`;
-          msg += `\n감지: ${this._timeAgo(r.timestamp)}`;
+      const r = regime.status === 'fulfilled' ? regime.value : null;
+      if (r) {
+        msg += `\n*시장 레짐:* ${r.regime} (신뢰도: ${r.confidence ? (r.confidence * 100).toFixed(0) + '%' : '?'})`;
+        if (r.timestamp) msg += `\n감지: ${this._timeAgo(r.timestamp)}`;
+      }
+
+      const mRows = market.status === 'fulfilled' ? market.value : [];
+      if (mRows?.length > 0) {
+        msg += '\n\n*주요 자산:*';
+        for (const m of mRows) {
+          const change = m.change_1d != null ? `${m.change_1d > 0 ? '+' : ''}${Number(m.change_1d).toFixed(2)}%` : '?';
+          msg += `\n  ${m.symbol}: $${Number(m.price || 0).toLocaleString()} (${change})`;
         }
       }
 
-      // Market data
-      if (marketResult.status === 'fulfilled' && marketResult.value?.success) {
-        const rows = marketResult.value.rows || [];
-        if (rows.length > 0) {
-          msg += '\n\n*주요 자산:*';
-          for (const r of rows) {
-            const change = r.change_1d ? `${r.change_1d > 0 ? '+' : ''}${r.change_1d.toFixed(2)}%` : '?';
-            msg += `\n  ${r.symbol}: $${r.price?.toLocaleString() || '?'} (${change})`;
-          }
-        }
-      }
-
-      // Recent analyses
-      if (analysisResult.status === 'fulfilled' && analysisResult.value?.success) {
-        const rows = analysisResult.value.rows || [];
-        if (rows.length > 0) {
-          msg += '\n\n*최근 AI 분석:*';
-          for (const r of rows) {
-            msg += `\n• ${r.type || '(제목 없음)'} - ${this._timeAgo(r.timestamp)}`;
-          }
+      const taRows = ta.status === 'fulfilled' ? ta.value : [];
+      if (taRows?.length > 0) {
+        msg += '\n\n*TA 신호 (상위):*';
+        for (const t of taRows.slice(0, 5)) {
+          const conf = t.confidence ? (t.confidence * 100).toFixed(0) + '%' : '?';
+          msg += `\n  ${t.symbol}: ${t.signal || '?'} (${conf})`;
         }
       }
 
@@ -822,104 +814,243 @@ Total: ${diskTotal} | Used: ${diskUsed} (${diskPct}) | Avail: ${diskAvail}`;
     }
   }
 
-  async _oracleGuru(chatId, investor, dbPath) {
+  async _oracleGuru(chatId, investor) {
     await this.bot.sendTyping(chatId);
     try {
-      let query, msg;
+      const rows = await this._getOracleClient().getGuruHoldings(investor || null);
+      let msg;
       if (investor) {
-        // Specific guru
-        query = `SELECT ticker, company_name, shares, value_usd, change_type, filing_date
-                 FROM guru_holdings
-                 WHERE investor LIKE '%${investor}%'
-                 ORDER BY value_usd DESC LIMIT 20`;
         msg = `*${investor} 포트폴리오*\n`;
-      } else {
-        // Convergence: tickers held by 2+ gurus
-        query = `SELECT ticker, COUNT(DISTINCT investor) as guru_count,
-                 GROUP_CONCAT(DISTINCT investor) as investors,
-                 SUM(value_usd) as total_value
-                 FROM guru_holdings
-                 WHERE ticker IS NOT NULL
-                 GROUP BY ticker HAVING guru_count >= 2
-                 ORDER BY guru_count DESC, total_value DESC LIMIT 20`;
-        msg = '*Guru Convergence (2+ 투자자 보유)*\n';
-      }
-
-      const result = this._unwrapToolResult(
-        await this.orchestrator.mcpManager.executeTool('query_database', {
-          query,
-          database_path: dbPath
-        })
-      );
-
-      if (result.success) {
-        const rows = result.rows || [];
-        if (rows.length === 0) {
-          msg += '\n결과 없음';
-        } else if (investor) {
+        if (!rows?.length) { msg += '\n결과 없음'; }
+        else {
           for (const r of rows) {
-            msg += `\n${r.ticker}: $${r.value_usd?.toLocaleString() || '?'} (${r.change_type || '?'}) - ${r.company_name || ''}`;
-          }
-        } else {
-          for (const r of rows) {
-            msg += `\n*${r.ticker}* (${r.guru_count}명): ${r.investors}`;
+            msg += `\n${r.ticker || r.symbol}: $${(r.value_usd || r.value || 0).toLocaleString()} (${r.change_type || r.change_pct || '?'}) - ${r.company_name || ''}`;
           }
         }
-        await this.bot.sendMessage(chatId, msg.substring(0, 4000));
       } else {
-        await this.bot.sendMessage(chatId, `쿼리 실패: ${result.error}`);
+        msg = '*Guru Convergence (2+ 투자자 보유)*\n';
+        if (!rows?.length) { msg += '\n결과 없음'; }
+        else {
+          for (const r of rows) {
+            msg += `\n*${r.ticker || r.symbol}* (${r.guru_count}명): ${r.investors}`;
+          }
+        }
+      }
+      await this.bot.sendMessage(chatId, msg.substring(0, 4000));
+    } catch (error) {
+      await this.bot.sendMessage(chatId, `오류: ${error.message}`);
+    }
+  }
+
+  async _oracleTa(chatId, symbol) {
+    await this.bot.sendTyping(chatId);
+    try {
+      const rows = await this._getOracleClient().getTechnicalSignals(symbol || null);
+      let msg;
+      if (symbol) {
+        msg = `*${symbol.toUpperCase()} 기술 분석*\n`;
+        const r = Array.isArray(rows) ? rows[0] : rows;
+        if (!r) { msg += '\n결과 없음'; }
+        else {
+          msg += `\nRSI: ${r.rsi != null ? Number(r.rsi).toFixed(1) : '?'}`;
+          msg += `\nMACD Signal: ${r.macd_signal || '?'}`;
+          msg += `\nTrend: ${r.trend || '?'}`;
+          msg += `\n\n*종합: ${r.signal || '?'}* (신뢰도: ${r.confidence ? (r.confidence * 100).toFixed(0) + '%' : '?'})`;
+          if (r.collected_at) msg += `\n분석: ${this._timeAgo(r.collected_at)}`;
+        }
+      } else {
+        msg = '*전체 TA 신호*\n';
+        if (!rows?.length) { msg += '\n결과 없음'; }
+        else {
+          for (const r of rows) {
+            const conf = r.confidence ? (r.confidence * 100).toFixed(0) + '%' : '?';
+            msg += `\n${r.symbol}: *${r.signal || '?'}* (${conf}) RSI:${r.rsi != null ? Number(r.rsi).toFixed(0) : '?'}`;
+          }
+        }
+      }
+      await this.bot.sendMessage(chatId, msg.substring(0, 4000));
+    } catch (error) {
+      await this.bot.sendMessage(chatId, `오류: ${error.message}`);
+    }
+  }
+
+  async _oracleHealth(chatId) {
+    await this.bot.sendTyping(chatId);
+    try {
+      const health = await this._getOracleClient().getHealth();
+      let msg = '*Oracle API Health*\n';
+      if (health?.uptime_seconds) {
+        msg += `\n상태: 가동 중`;
+        msg += `\n가동 시간: ${Math.floor(health.uptime_seconds / 3600)}h ${Math.floor((health.uptime_seconds % 3600) / 60)}m`;
+        if (health.db_size_mb) msg += `\nDB 크기: ${health.db_size_mb}MB`;
+        if (health.last_collections) {
+          msg += '\n\n*최근 수집:*';
+          for (const [k, v] of Object.entries(health.last_collections)) {
+            msg += `\n  ${k}: ${v ? this._timeAgo(v) : 'never'}`;
+          }
+        }
+      } else {
+        msg += `\n상태: API 미가동 (DB 직접 접속 모드)`;
+        msg += `\nURL: ${this._getOracleClient().apiUrl}`;
+      }
+      await this.bot.sendMessage(chatId, msg);
+    } catch (error) {
+      await this.bot.sendMessage(chatId, `오류: ${error.message}`);
+    }
+  }
+
+  // ─── Approval & Schedule Commands ────────────────────
+
+  _getApprovalGate() {
+    // The systemExec tool has an approvalGate reference
+    const execTool = this.orchestrator.mcpManager.tools?.get('system_exec');
+    return execTool?.approvalGate || null;
+  }
+
+  async _cmdApprove(chatId, requestId) {
+    if (!requestId) {
+      await this.bot.sendMessage(chatId, '사용법: /approve <requestId>');
+      return;
+    }
+    try {
+      const gate = this._getApprovalGate();
+      if (!gate) {
+        await this.bot.sendMessage(chatId, '승인 시스템이 초기화되지 않았어요.');
+        return;
+      }
+      const result = gate.approveRequest(requestId.trim());
+      if (result.status === 'approved') {
+        // Execute the approved command
+        const execResult = this._unwrapToolResult(
+          await this.orchestrator.mcpManager.executeTool('system_exec', { command: result.command })
+        );
+        const output = execResult.success ? (execResult.output || '(빈 출력)').substring(0, 3000) : `실패: ${execResult.error}`;
+        await this.bot.sendMessage(chatId, `✅ *승인 + 실행 완료*\n\n명령: \`${result.command}\`\n\n\`\`\`\n${output}\n\`\`\``);
+      } else {
+        await this.bot.sendMessage(chatId, `승인 실패: ${result.status}`);
       }
     } catch (error) {
       await this.bot.sendMessage(chatId, `오류: ${error.message}`);
     }
   }
 
-  async _oracleTa(chatId, symbol, dbPath) {
-    await this.bot.sendTyping(chatId);
+  async _cmdDeny(chatId, requestId) {
+    if (!requestId) {
+      await this.bot.sendMessage(chatId, '사용법: /deny <requestId>');
+      return;
+    }
     try {
-      let query, msg;
-      if (symbol) {
-        query = `SELECT symbol, rsi, macd_signal, trend, signal, confidence, collected_at
-                 FROM technical_analysis
-                 WHERE symbol = '${symbol.toUpperCase()}'
-                 ORDER BY collected_at DESC LIMIT 1`;
-        msg = `*${symbol.toUpperCase()} 기술 분석*\n`;
+      const gate = this._getApprovalGate();
+      if (!gate) {
+        await this.bot.sendMessage(chatId, '승인 시스템이 초기화되지 않았어요.');
+        return;
+      }
+      const result = gate.denyRequest(requestId.trim());
+      if (result.status === 'denied') {
+        await this.bot.sendMessage(chatId, `❌ *거부됨*\n\n명령: \`${result.command}\``);
       } else {
-        query = `SELECT symbol, signal, confidence, rsi, trend, collected_at
-                 FROM technical_analysis
-                 WHERE collected_at = (SELECT MAX(collected_at) FROM technical_analysis)
-                 ORDER BY confidence DESC`;
-        msg = '*전체 TA 신호*\n';
+        await this.bot.sendMessage(chatId, `거부 실패: ${result.status}`);
+      }
+    } catch (error) {
+      await this.bot.sendMessage(chatId, `오류: ${error.message}`);
+    }
+  }
+
+  async _cmdCredentials(chatId, argStr) {
+    try {
+      const cm = this.orchestrator.credentialManager;
+      if (!cm) {
+        await this.bot.sendMessage(chatId, '자격증명 관리자가 초기화되지 않았어요.');
+        return;
       }
 
-      const result = this._unwrapToolResult(
-        await this.orchestrator.mcpManager.executeTool('query_database', {
-          query,
-          database_path: dbPath
-        })
-      );
-
-      if (result.success) {
-        const rows = result.rows || [];
-        if (rows.length === 0) {
-          msg += '\n결과 없음';
-        } else if (symbol) {
-          const r = rows[0];
-          msg += `\nRSI: ${r.rsi?.toFixed(1) || '?'}`;
-          msg += `\nMACD Signal: ${r.macd_signal || '?'}`;
-          msg += `\nTrend: ${r.trend || '?'}`;
-          msg += `\n\n*종합: ${r.signal || '?'}* (신뢰도: ${r.confidence ? (r.confidence * 100).toFixed(0) + '%' : '?'})`;
-          msg += `\n분석: ${this._timeAgo(r.collected_at)}`;
-        } else {
-          for (const r of rows) {
-            const conf = r.confidence ? (r.confidence * 100).toFixed(0) + '%' : '?';
-            const sig = r.signal || '?';
-            msg += `\n${r.symbol}: *${sig}* (${conf}) RSI:${r.rsi?.toFixed(0) || '?'}`;
-          }
+      // /creds reset <name> - 키 상태 리셋
+      if (argStr && argStr.startsWith('reset')) {
+        const name = argStr.split(/\s+/)[1];
+        if (!name) {
+          await this.bot.sendMessage(chatId, '사용법: /creds reset <name> (예: openai, gemini)');
+          return;
         }
-        await this.bot.sendMessage(chatId, msg.substring(0, 4000));
+        const ok = cm.resetKey(name);
+        await this.bot.sendMessage(chatId, ok ? `${name} 키 상태를 리셋했어요.` : `${name}은(는) 등록되지 않았어요.`);
+        return;
+      }
+
+      // 전체 상태 보고
+      const status = cm.getStatus();
+      const names = Object.keys(status);
+      if (names.length === 0) {
+        await this.bot.sendMessage(chatId, '등록된 자격증명이 없어요.');
+        return;
+      }
+
+      let msg = '*API 키 상태*\n';
+      for (const name of names) {
+        const s = status[name];
+        const icons = s.keys.map(k => {
+          if (k.active) return k.status === 'active' ? '🟢' : '🟡';
+          return k.status === 'disabled' ? '🔴' : k.status === 'cooldown' ? '🟠' : '⚪';
+        });
+        msg += `\n*${name}*: ${icons.join('')} (${s.keys.filter(k => k.status === 'active' || k.status === 'degraded').length}/${s.totalKeys} active)`;
+        const current = s.keys.find(k => k.active);
+        if (current?.lastError) msg += `\n  └ 마지막 에러: ${current.lastError.substring(0, 50)}`;
+      }
+      msg += '\n\n키 리셋: /creds reset <name>';
+      await this.bot.sendMessage(chatId, msg);
+    } catch (error) {
+      await this.bot.sendMessage(chatId, `오류: ${error.message}`);
+    }
+  }
+
+  async _cmdPending(chatId) {
+    try {
+      const gate = this._getApprovalGate();
+      if (!gate) {
+        await this.bot.sendMessage(chatId, '승인 시스템이 초기화되지 않았어요.');
+        return;
+      }
+      const pending = gate.getPendingRequests();
+      if (pending.length === 0) {
+        await this.bot.sendMessage(chatId, '대기 중인 승인 요청이 없어요.');
+        return;
+      }
+      let msg = `*대기 중인 승인 요청* (${pending.length}건)\n`;
+      for (const req of pending) {
+        msg += `\nID: \`${req.id.substring(0, 8)}...\`\n명령: \`${req.command}\`\n등급: ${req.security_level}\n만료: ${req.expires_at}\n`;
+      }
+      msg += '\n/approve <id> 또는 /deny <id>';
+      await this.bot.sendMessage(chatId, msg);
+    } catch (error) {
+      await this.bot.sendMessage(chatId, `오류: ${error.message}`);
+    }
+  }
+
+  async _cmdSchedule(chatId, argStr) {
+    if (!argStr) {
+      await this.bot.sendMessage(chatId, `*스케줄 관리*\n\n/schedule list - 예약 목록\n/schedule run <id> - 즉시 실행\n/schedule toggle <id> - 활성/비활성 전환\n/schedule delete <id> - 삭제`);
+      return;
+    }
+    await this.bot.sendTyping(chatId);
+    const parts = argStr.split(/\s+/);
+    const subCmd = parts[0].toLowerCase();
+    const subArg = parts.slice(1).join(' ');
+
+    try {
+      const result = this._unwrapToolResult(
+        await this.orchestrator.mcpManager.executeTool(
+          subCmd === 'list' ? 'list_scheduled_tasks' :
+          subCmd === 'run' ? 'run_scheduled_task' :
+          subCmd === 'toggle' ? 'toggle_scheduled_task' :
+          subCmd === 'delete' ? 'delete_scheduled_task' :
+          'list_scheduled_tasks',
+          subCmd === 'list' ? {} : { taskId: subArg }
+        )
+      );
+      if (result.success) {
+        const output = typeof result.data === 'object' ? JSON.stringify(result.data, null, 2) : String(result.data || result.message || 'OK');
+        await this.bot.sendMessage(chatId, `*스케줄 ${subCmd}*\n\n\`\`\`\n${output.substring(0, 3500)}\n\`\`\``);
       } else {
-        await this.bot.sendMessage(chatId, `쿼리 실패: ${result.error}`);
+        await this.bot.sendMessage(chatId, `실패: ${result.error || result.message}`);
       }
     } catch (error) {
       await this.bot.sendMessage(chatId, `오류: ${error.message}`);

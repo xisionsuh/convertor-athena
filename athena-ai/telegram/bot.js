@@ -95,8 +95,14 @@ export class LumielleBot {
         }
       } catch (error) {
         if (this.polling) {
-          logger.error('LumielleBot: Poll error', error);
-          await this._sleep(5000);
+          const isTimeout = error.name === 'TimeoutError' || error.code === 23;
+          if (isTimeout) {
+            logger.debug('LumielleBot: Poll timeout (expected)');
+            await this._sleep(1000);
+          } else {
+            logger.error('LumielleBot: Poll error', error);
+            await this._sleep(5000);
+          }
         }
       }
     }
@@ -326,7 +332,7 @@ export class LumielleBot {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(method === 'getUpdates' ? (POLL_TIMEOUT + 10) * 1000 : 30000)
+      signal: AbortSignal.timeout(method === 'getUpdates' ? (POLL_TIMEOUT + 15) * 1000 : 30000)
     });
     return resp.json();
   }

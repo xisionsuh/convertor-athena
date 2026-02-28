@@ -10,15 +10,46 @@ export class GeminiProvider extends AIProvider {
 
   async chat(messages, options = {}) {
     try {
-      const model = this.client.getGenerativeModel({ model: this.model });
+      // system 메시지 분리 → systemInstruction으로 전달
+      let systemInstruction = undefined;
+      const filtered = [];
+      for (const msg of messages) {
+        if (msg.role === 'system') {
+          systemInstruction = msg.content;
+        } else {
+          filtered.push(msg);
+        }
+      }
 
-      // Convert messages to Gemini format
-      const history = messages.slice(0, -1).map(msg => ({
-        role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: msg.content }]
-      }));
+      const modelOpts = { model: this.model };
+      if (systemInstruction) {
+        modelOpts.systemInstruction = systemInstruction;
+      }
+      const model = this.client.getGenerativeModel(modelOpts);
 
-      const lastMessage = messages[messages.length - 1].content;
+      const lastMessage = filtered[filtered.length - 1]?.content || messages[messages.length - 1].content;
+
+      // Build history from all but the last message, merging consecutive same-role messages
+      let history = [];
+      if (filtered.length > 1) {
+        const merged = [];
+        for (const msg of filtered.slice(0, -1)) {
+          const role = msg.role === 'assistant' ? 'model' : 'user';
+          const last = merged[merged.length - 1];
+          if (last && last.role === role) {
+            last.parts[0].text += '\n' + msg.content;
+          } else {
+            merged.push({ role, parts: [{ text: msg.content }] });
+          }
+        }
+
+        // Gemini requires history to start with 'user' role - drop leading 'model' messages
+        while (merged.length > 0 && merged[0].role === 'model') {
+          merged.shift();
+        }
+
+        history = merged;
+      }
 
       const chat = model.startChat({ history });
       const result = await chat.sendMessage(lastMessage);
@@ -29,7 +60,7 @@ export class GeminiProvider extends AIProvider {
         provider: this.name,
         model: this.model,
         usage: {
-          inputTokens: 0, // Gemini doesn't provide token count in free tier
+          inputTokens: 0,
           outputTokens: 0
         }
       };
@@ -60,13 +91,20 @@ export class GeminiProvider extends AIProvider {
 
       // 연속 같은 role 병합 (Gemini는 user/model 교대 필수)
       const merged = [];
-      for (const msg of filtered.slice(0, -1)) {
-        const role = msg.role === 'assistant' ? 'model' : 'user';
-        const last = merged[merged.length - 1];
-        if (last && last.role === role) {
-          last.parts[0].text += '\n' + msg.content;
-        } else {
-          merged.push({ role, parts: [{ text: msg.content }] });
+      if (filtered.length > 1) {
+        for (const msg of filtered.slice(0, -1)) {
+          const role = msg.role === 'assistant' ? 'model' : 'user';
+          const last = merged[merged.length - 1];
+          if (last && last.role === role) {
+            last.parts[0].text += '\n' + msg.content;
+          } else {
+            merged.push({ role, parts: [{ text: msg.content }] });
+          }
+        }
+
+        // Gemini requires history to start with 'user' role - drop leading 'model' messages
+        while (merged.length > 0 && merged[0].role === 'model') {
+          merged.shift();
         }
       }
 

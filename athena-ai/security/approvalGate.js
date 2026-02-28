@@ -129,6 +129,41 @@ export class ApprovalGate {
     return result.changes;
   }
 
+  approveRequest(requestId) {
+    const row = this.getRequestStmt.get(requestId);
+    if (!row) return { status: 'not_found' };
+    if (row.status !== 'pending') return { status: row.status };
+
+    // Check expiry
+    this.expireOneStmt.run(requestId);
+    const updated = this.getRequestStmt.get(requestId);
+    if (updated.status === 'expired') return { status: 'expired' };
+
+    this.db.prepare(`
+      UPDATE command_approvals
+      SET status = 'approved', resolved_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND status = 'pending'
+    `).run(requestId);
+
+    logger.info('Approval request approved', { requestId });
+    return { status: 'approved', command: row.command };
+  }
+
+  denyRequest(requestId) {
+    const row = this.getRequestStmt.get(requestId);
+    if (!row) return { status: 'not_found' };
+    if (row.status !== 'pending') return { status: row.status };
+
+    this.db.prepare(`
+      UPDATE command_approvals
+      SET status = 'denied', resolved_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND status = 'pending'
+    `).run(requestId);
+
+    logger.info('Approval request denied', { requestId });
+    return { status: 'denied', command: row.command };
+  }
+
   getPendingRequests() {
     this.cleanExpired();
 

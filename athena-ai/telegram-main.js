@@ -16,6 +16,25 @@ import { logger } from './utils/logger.js';
 import { LumielleBot } from './telegram/bot.js';
 import { MessageHandler } from './telegram/handler.js';
 import { ProactiveNotifier } from './telegram/proactive.js';
+import { CronScheduler } from './core/scheduler.js';
+import { TelegramChannel } from './channels/telegramChannel.js';
+import { ChannelRouter } from './channels/channelRouter.js';
+
+// Global error handlers to prevent silent crashes (#9)
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('[WARN] Unhandled Promise Rejection:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  logger.error('[FATAL] Uncaught Exception:', error);
+  // Only exit for truly fatal errors that cannot be recovered
+  const isFatal = error.code === 'ERR_IPC_CHANNEL_CLOSED'
+    || (error instanceof RangeError && error.message?.includes('allocation'))
+    || error.message?.includes('out of memory');
+  if (isFatal) {
+    setTimeout(() => process.exit(1), 1000);
+  }
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -81,17 +100,38 @@ const handler = new MessageHandler({
 
 bot.setHandler(handler);
 
+// Channel Router 초기화 (멀티채널 추상화)
+const telegramChannel = new TelegramChannel({ bot });
+const channelRouter = new ChannelRouter({ channels: [telegramChannel] });
+orchestrator.channelRouter = channelRouter;
+
+// CronScheduler 초기화 (MCP 준비 후 시작)
+const scheduler = new CronScheduler({
+  dbPath,
+  mcpManager: orchestrator.mcpManager,
+  bot,
+  interval: 60000  // 1분 주기
+});
+
 // 시작
 bot.startPolling();
 notifier.start();
+// MCP 초기화 완료 후 스케줄러 시작
+setTimeout(() => {
+  scheduler.start();
+  logger.info('CronScheduler started (deferred after MCP init)');
+}, 5000);
 
 console.log(`
 ╔════════════════════════════════════════╗
 ║                                        ║
-║   ✨  Lumielle AI - Telegram Bot      ║
+║   ✨  Lumielle AI v2.0                ║
 ║                                        ║
 ║   Bot: @Lumielle_ai_bot               ║
 ║   Status: Polling...                   ║
+║   Scheduler: Active (60s interval)     ║
+║   Channels: ${channelRouter.getEnabledChannels().length} active                    ║
+║   SubAgents: max 8 concurrent          ║
 ║                                        ║
 ╚════════════════════════════════════════╝
 `);
@@ -105,6 +145,7 @@ logger.info('Lumielle Telegram Bot started', {
 // 종료 처리
 process.on('SIGINT', () => {
   logger.info('Lumielle: SIGINT received');
+  scheduler.stop();
   bot.stopPolling();
   notifier.stop();
   process.exit(0);
@@ -112,6 +153,7 @@ process.on('SIGINT', () => {
 
 process.on('SIGTERM', () => {
   logger.info('Lumielle: SIGTERM received');
+  scheduler.stop();
   bot.stopPolling();
   notifier.stop();
   process.exit(0);

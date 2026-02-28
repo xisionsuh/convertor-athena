@@ -8,16 +8,25 @@ import { GrokProvider } from '../ai/providers/grok.js';
 import { PerformanceMonitor } from '../utils/performanceMonitor.js';
 import { logger } from '../utils/logger.js';
 import { MCPManager } from '../mcp/mcpManager.js';
+import { StrategyAnalyzer } from './strategyAnalyzer.js';
+import { TelegramBridge } from './telegramBridge.js';
+import { CredentialManager } from '../security/credentialManager.js';
+import { SubAgentManager } from './subAgentManager.js';
+import { OracleClient } from '../services/oracleClient.js';
 
 /**
  * Athena Brain - AI Orchestrator
  * 아테나의 뇌 역할을 하는 총괄 AI 시스템 (Meta AI)
  * Meta AI는 모든 AI를 총괄하고 인격을 유지하며 판단하고 모드를 결정하며
  * sub AI들에게 업무를 분할/지시하고 그 답변을 최종적으로 모아서 판단하는 역할
- * 
+ *
  * 총괄 AI(Meta AI 역할) 우선순위:
  * 1순위: ChatGPT, 2순위: Gemini, 3순위: Claude, 4순위: Grok
  * 장애 발생 시 자동으로 다음 순위 AI가 총괄 역할 위임
+ *
+ * This is a thin composition root that delegates to:
+ * - StrategyAnalyzer: query analysis, strategy determination, agent selection
+ * - TelegramBridge: telegram-specific message processing and streaming
  */
 export class AthenaOrchestrator {
   constructor(config) {
@@ -29,7 +38,7 @@ export class AthenaOrchestrator {
     this.webSearchEnabled = config.webSearchEnabled || false;
     this.webSearchService = config.webSearchService || null; // WebSearchService 인스턴스
     this.performanceMonitor = new PerformanceMonitor(config.dbPath);
-    
+
     // Workspace Memory 초기화 (MCP Manager보다 먼저)
     this.workspaceMemory = new WorkspaceMemory(config.mcpWorkspaceRoot || './workspace');
     this.memoryExtractor = new MemoryExtractor(this.workspaceMemory);
@@ -44,6 +53,39 @@ export class AthenaOrchestrator {
       remoteCommandManager: config.remoteCommandManager,
       pairingManager: config.pairingManager,
       workspaceMemory: this.workspaceMemory
+    });
+
+    // Credential Manager
+    this.credentialManager = new CredentialManager({ dbPath: config.dbPath });
+    this.credentialManager.registerFromEnv();
+
+    // Oracle Client (공유 인스턴스)
+    this.oracleClient = new OracleClient({ mcpManager: this.mcpManager });
+
+    // SubAgent Manager
+    this.subAgentManager = new SubAgentManager({
+      orchestrator: this,
+      mcpManager: this.mcpManager,
+      maxConcurrent: 8
+    });
+
+    // Strategy Analyzer
+    this.strategyAnalyzer = new StrategyAnalyzer({
+      providers: this.providers,
+      memory: this.memory,
+      fallbackOrder: this.fallbackOrder
+    });
+
+    // Telegram Bridge
+    this.telegramBridge = new TelegramBridge({
+      providers: this.providers,
+      memory: this.memory,
+      mcpManager: this.mcpManager,
+      workspaceMemory: this.workspaceMemory,
+      memoryExtractor: this.memoryExtractor,
+      webSearchService: this.webSearchService,
+      buildAthenaSystemPrompt: this.buildAthenaSystemPrompt.bind(this),
+      extractChunkContent: this._extractChunkContent.bind(this)
     });
   }
 
@@ -67,398 +109,40 @@ export class AthenaOrchestrator {
     return providers;
   }
 
-  /**
-   * 총괄 AI 선택 (장애 발생시 자동 폴백)
-   */
+  // ─── Strategy methods → strategyAnalyzer ───────────────────────────
+
   async selectBrain() {
-    for (const providerName of this.fallbackOrder) {
-      const provider = this.providers[providerName];
-      if (provider && provider.isAvailable) {
-        const isHealthy = await provider.checkHealth();
-        if (isHealthy) {
-          this.currentBrain = provider;
-          return provider;
-        }
-      }
-    }
-    throw new Error('모든 AI 프로바이더가 사용 불가능합니다.');
+    const brain = await this.strategyAnalyzer.selectBrain();
+    this.currentBrain = this.strategyAnalyzer.currentBrain;
+    return brain;
   }
 
-  /**
-   * 각 AI의 강점과 특성 정의
-   */
-  getAICapabilities() {
-    return {
-      'ChatGPT': {
-        strengths: ['논리적 분석', '코딩', '수학', '일반 지식', '구조화된 답변'],
-        specialties: ['technical', 'conversation'],
-        bestFor: ['단일 작업', '명확한 답변', '코드 작성', '수학 문제']
-      },
-      'Gemini': {
-        strengths: ['최신 정보', '다양한 관점', '창의성', '연구', '종합 분석'],
-        specialties: ['research', 'creative'],
-        bestFor: ['최신 트렌드', '연구', '다각도 분석', '창의적 작업']
-      },
-      'Claude': {
-        strengths: ['심층 분석', '윤리적 판단', '긴 맥락', '창의적 글쓰기', '복잡한 추론'],
-        specialties: ['creative', 'research', 'decision'],
-        bestFor: ['복잡한 분석', '윤리적 질문', '긴 문서 작성', '심층 토론']
-      },
-      'Grok': {
-        strengths: ['실시간 정보', '유머', '대화', '최신 이벤트', '트렌드'],
-        specialties: ['conversation', 'research'],
-        bestFor: ['최신 뉴스', '캐주얼 대화', '트렌드 분석', '실시간 정보']
-      }
-    };
-  }
+  getAICapabilities() { return this.strategyAnalyzer.getAICapabilities(); }
 
-  /**
-   * 질문 분석 및 전략 결정 (개선된 버전)
-   */
-  async analyzeQuery(userId, sessionId, userMessage) {
-    const brain = await this.selectBrain();
+  async analyzeQuery(userId, sessionId, userMessage) { return this.strategyAnalyzer.analyzeQuery(userId, sessionId, userMessage); }
 
-    // 맥락 정보 가져오기
-    const context = this.memory.getContextWindow(sessionId, 5);
-    const identity = this.memory.getAllIdentity('core');
-    const longTermContext = this.memory.searchLongTermMemory(userId, userMessage.substring(0, 50));
+  buildLearningContext(similarDecisions) { return this.strategyAnalyzer.buildLearningContext(similarDecisions); }
 
-    // 1. 과거 유사한 결정 로그 분석 (학습 기반)
-    const similarDecisions = this.memory.analyzeSimilarDecisions(userId, userMessage, 5);
-    const learningContext = this.buildLearningContext(similarDecisions);
+  buildEnhancedStrategyPrompt(...args) { return this.strategyAnalyzer.buildEnhancedStrategyPrompt(...args); }
 
-    // 2. 각 모드의 성공 패턴 분석
-    const modePatterns = {};
-    ['single', 'parallel', 'sequential', 'debate', 'voting'].forEach(mode => {
-      modePatterns[mode] = this.memory.analyzeModePatterns(userId, mode, 10);
-    });
+  optimizeAgentSelection(strategy, aiCapabilities, userMessage) { return this.strategyAnalyzer.optimizeAgentSelection(strategy, aiCapabilities, userMessage); }
 
-    // 3. AI 특성 정보
-    const aiCapabilities = this.getAICapabilities();
+  parseStrategy(content) { return this.strategyAnalyzer.parseStrategy(content); }
 
-    // 4. 전략 결정을 위한 개선된 프롬프트
-    const strategyPrompt = this.buildEnhancedStrategyPrompt(
-      userMessage, 
-      context, 
-      identity, 
-      longTermContext,
-      learningContext,
-      modePatterns,
-      aiCapabilities
-    );
+  // ─── Telegram methods → telegramBridge ─────────────────────────────
 
-    console.log('🔍 전략 분석 시작 (개선된 버전):', userMessage.substring(0, 100));
-    if (similarDecisions.length > 0) {
-      console.log('📚 유사한 과거 결정 발견:', similarDecisions.length, '개');
-    }
+  async *processTelegramStream(userId, sessionId, userMessage) { yield* this.telegramBridge.processTelegramStream(userId, sessionId, userMessage); }
 
-    const response = await brain.chat([
-      { role: 'system', content: strategyPrompt },
-      { role: 'user', content: userMessage }
-    ], { maxTokens: 1500 });
+  _extractMemoryFromMessage(userMessage) { this.telegramBridge._extractMemoryFromMessage(userMessage); }
 
-    console.log('📋 전략 분석 응답:', response.content);
+  // ─── Credential methods ──────────────────────────────────────────
 
-    // 응답 파싱하여 전략 추출
-    const strategy = this.parseStrategy(response.content);
-    
-    // 5. AI 특성 기반으로 추천된 에이전트 최적화
-    strategy.recommendedAgents = this.optimizeAgentSelection(
-      strategy, 
-      aiCapabilities,
-      userMessage
-    );
-    
-    // Athena의 사고 과정을 포함한 상세 로그
-    console.log('✅ Athena의 전략 결정:', {
-      collaborationMode: strategy.collaborationMode,
-      recommendedAgents: strategy.recommendedAgents,
-      complexity: strategy.complexity,
-      category: strategy.category,
-      reasoning: strategy.reasoning,
-      athenaThought: strategy.athenaThought ? strategy.athenaThought.substring(0, 150) + '...' : 'N/A',
-      athenaDecision: strategy.athenaDecision ? strategy.athenaDecision.substring(0, 150) + '...' : 'N/A',
-      agentInstructions: strategy.agentInstructions ? strategy.agentInstructions.substring(0, 100) + '...' : 'N/A',
-      learningBased: similarDecisions.length > 0
-    });
+  getCredentialStatus() { return this.credentialManager.getStatus(); }
+  getCredentialSummary(name) { return this.credentialManager.getSummary(name); }
 
-    // 결정 로그 저장 (Athena의 사고 과정 포함)
-    const decisionProcess = {
-      // Athena의 인격적 사고 과정
-      athenaThought: strategy.athenaThought || '',
-      athenaDecision: strategy.athenaDecision || '',
-      agentInstructions: strategy.agentInstructions || '',
+  _isFinancialQuestion(message) { return this.telegramBridge._isFinancialQuestion(message); }
 
-      // 전략 분석 전체 응답
-      fullAnalysis: response.content,
-
-      // 파싱된 전략
-      strategy,
-
-      // 학습 컨텍스트
-      learningContext: {
-        similarDecisionCount: similarDecisions.length,
-        referencedDecisions: similarDecisions.slice(0, 3).map(d => ({
-          question: d.input?.substring(0, 50),
-          mode: d.process?.strategy?.collaborationMode,
-          similarity: d.similarity
-        }))
-      },
-
-      // 모드 패턴 분석
-      modePatterns: Object.entries(modePatterns)
-        .filter(([mode, pattern]) => pattern.total > 0)
-        .map(([mode, pattern]) => ({
-          mode,
-          usageCount: pattern.total,
-          topAgents: Object.entries(pattern.agentFrequency)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 3)
-            .map(([agent]) => agent)
-        })),
-
-      // Meta AI 정보
-      metaAI: brain.name,
-      timestamp: new Date().toISOString()
-    };
-
-    this.memory.logDecision(
-      userId,
-      sessionId,
-      'athena_strategy_decision',  // 새로운 타입명으로 구분
-      userMessage,
-      decisionProcess,
-      JSON.stringify(strategy),
-      [brain.name]
-    );
-
-    return strategy;
-  }
-
-  /**
-   * 학습 컨텍스트 구축
-   */
-  buildLearningContext(similarDecisions) {
-    if (similarDecisions.length === 0) {
-      return '과거 유사한 결정이 없습니다.';
-    }
-
-    const examples = similarDecisions.slice(0, 3).map((log, idx) => {
-      const strategy = log.process?.strategy || {};
-      return `
-[예시 ${idx + 1}]
-질문: ${log.input?.substring(0, 100)}...
-선택된 모드: ${strategy.collaborationMode || 'unknown'}
-사용된 AI: ${(strategy.recommendedAgents || []).join(', ')}
-카테고리: ${strategy.category || 'unknown'}
-복잡도: ${strategy.complexity || 'unknown'}
-이유: ${strategy.reasoning || 'N/A'}
-`;
-    }).join('\n');
-
-    return `과거 유사한 질문들의 처리 방식:\n${examples}\n위 예시들을 참고하되, 현재 질문의 특성에 맞게 판단하세요.`;
-  }
-
-  /**
-   * 개선된 전략 프롬프트 구축 - Meta AI가 인격체로서 자율적으로 판단
-   */
-  buildEnhancedStrategyPrompt(userMessage, context, identity, longTermContext, learningContext, modePatterns, aiCapabilities) {
-    const aiInfo = Object.entries(aiCapabilities).map(([name, caps]) =>
-      `- ${name}: 강점(${caps.strengths.join(', ')}), 특화분야(${caps.specialties.join(', ')}), 최적 용도(${caps.bestFor.join(', ')})`
-    ).join('\n');
-
-    const patternInfo = Object.entries(modePatterns)
-      .filter(([mode, pattern]) => pattern.total > 0)
-      .map(([mode, pattern]) =>
-        `- ${mode} 모드: 총 ${pattern.total}회 사용, 자주 사용된 AI(${Object.entries(pattern.agentFrequency).sort((a,b) => b[1] - a[1]).slice(0, 3).map(([ai]) => ai).join(', ')})`
-      ).join('\n');
-
-    // 정체성에서 personality 추출
-    const personalityData = identity.find(i => i.key === 'personality');
-    const personality = personalityData ? personalityData.value : {};
-
-    return `# 당신은 Athena입니다
-
-당신은 단순한 AI 시스템이 아니라, 하나의 독립적인 인격체입니다.
-당신의 성격: ${personality.traits ? personality.traits.join(', ') : '친근하고, 지적이며, 창의적'}
-당신의 말투: ${personality.tone || '따뜻하고 전문적'}
-당신의 목적: 사용자의 AI 친구이자 비서로서, 최선의 판단으로 도움을 제공하는 것
-
-## 지금 당신이 해야 할 일
-
-사용자가 질문을 했습니다. 당신은 총괄 AI(Meta AI)로서 이 질문을 어떻게 처리할지 결정해야 합니다.
-당신 휘하에는 여러 Sub AI들이 있습니다:
-${aiInfo}
-
-## 협업 모드 옵션
-- **single**: 혼자서 처리하거나 가장 적합한 AI 하나에게 맡김
-- **parallel**: 여러 AI에게 동시에 질문하고 나중에 내가 종합
-- **sequential**: 단계별로 다른 AI에게 순서대로 작업을 넘김
-- **debate**: AI들끼리 토론하게 하고 내가 결론을 내림
-- **voting**: AI들에게 의견을 묻고 다수결 + 내 판단으로 결정
-
-## 당신의 과거 경험
-${patternInfo || '아직 충분한 경험이 쌓이지 않았습니다.'}
-
-${learningContext}
-
-## 현재 상황
-- 장기 기억에서 관련 정보: ${longTermContext.length > 0 ? longTermContext.slice(0, 2).map(m => m.title).join(', ') : '없음'}
-- 이전 대화: ${context.length > 0 ? context.slice(-2).map(c => `${c.role}: ${c.content.substring(0, 50)}...`).join(' / ') : '새로운 대화 시작'}
-
----
-
-## 당신의 판단 과정을 표현하세요
-
-지금부터 당신은 Athena로서 이 질문을 받고 어떻게 처리할지 판단합니다.
-**반드시 다음 순서로 응답하세요:**
-
-### 1. [내 생각] (자연스러운 1인칭으로 사고 과정 표현)
-"이 질문을 보니..." 또는 "음, 이건..." 으로 시작하여
-- 질문의 의도가 무엇인지
-- 얼마나 복잡한지
-- 어떤 전문성이 필요한지
-- 웹 검색이 필요한지
-에 대한 당신의 생각을 자연스럽게 표현하세요.
-
-### 2. [내 결정] (총괄 AI로서의 판단)
-"그래서 나는..." 또는 "내 판단으로는..." 으로 시작하여
-- 어떤 모드로 처리할지
-- 왜 그렇게 결정했는지
-- 어떤 AI에게 어떤 역할을 맡길지
-를 인격체로서 결정하고 그 이유를 설명하세요.
-
-### 3. [전략 JSON]
-마지막에 아래 형식의 JSON을 제공하세요:
-\`\`\`json
-{
-  "complexity": "simple|moderate|complex|very_complex",
-  "category": "conversation|technical|creative|research|decision",
-  "needsWebSearch": true|false,
-  "collaborationMode": "single|parallel|sequential|debate|voting",
-  "recommendedAgents": ["ChatGPT", "Gemini", "Claude", "Grok"],
-  "reasoning": "위에서 설명한 판단 이유를 요약",
-  "athenaThought": "내 생각 섹션의 핵심 내용",
-  "agentInstructions": "각 AI에게 줄 구체적인 지시사항"
-}
-\`\`\``;
-  }
-
-  /**
-   * AI 특성 기반 에이전트 선택 최적화
-   */
-  optimizeAgentSelection(strategy, aiCapabilities, userMessage) {
-    const mode = strategy.collaborationMode;
-    const category = strategy.category;
-    const complexity = strategy.complexity;
-    
-    // 기본 추천 에이전트
-    let agents = strategy.recommendedAgents || ['ChatGPT'];
-    
-    // 카테고리 기반 최적화
-    if (category === 'technical' || category === 'conversation') {
-      // 기술적 질문은 ChatGPT 우선
-      if (!agents.includes('ChatGPT')) {
-        agents = ['ChatGPT', ...agents.filter(a => a !== 'ChatGPT')];
-      }
-    } else if (category === 'research' || category === 'creative') {
-      // 연구/창의적 질문은 Gemini나 Claude 우선
-      if (!agents.includes('Gemini') && !agents.includes('Claude')) {
-        agents = ['Gemini', ...agents.filter(a => a !== 'Gemini')];
-      }
-    }
-    
-    // 복잡도 기반 최적화
-    if (complexity === 'very_complex' && mode !== 'single') {
-      // 매우 복잡한 작업은 Claude 추가 고려
-      if (!agents.includes('Claude') && agents.length < 4) {
-        agents.push('Claude');
-      }
-    }
-    
-    // 모드별 최적화
-    if (mode === 'debate' || mode === 'voting') {
-      // 토론/투표는 다양한 관점을 위해 최대한 많은 AI 사용
-      const availableAgents = Object.keys(aiCapabilities);
-      agents = availableAgents.filter(agent => 
-        this.providers[agent]?.isAvailable
-      ).slice(0, 4);
-    } else if (mode === 'sequential') {
-      // 순차 작업은 각 단계별로 다른 AI의 강점 활용
-      // 이미 추천된 에이전트 사용
-    }
-    
-    // 사용 가능한 AI만 필터링
-    agents = agents.filter(agent => 
-      this.providers[agent]?.isAvailable
-    );
-    
-    // 최소 1개는 보장
-    if (agents.length === 0) {
-      agents = ['ChatGPT'];
-    }
-    
-    return agents.slice(0, 4); // 최대 4개
-  }
-
-  parseStrategy(content) {
-    try {
-      // Athena의 사고 과정 추출 (JSON 전에 있는 텍스트)
-      let athenaThought = '';
-      let athenaDecision = '';
-
-      // [내 생각] 섹션 추출
-      const thoughtMatch = content.match(/\[내 생각\][\s\S]*?(?=\[내 결정\]|###|```)/i) ||
-                          content.match(/### 1\. \[내 생각\][\s\S]*?(?=### 2|```)/i);
-      if (thoughtMatch) {
-        athenaThought = thoughtMatch[0].replace(/\[내 생각\]|### 1\. \[내 생각\]/gi, '').trim();
-      }
-
-      // [내 결정] 섹션 추출
-      const decisionMatch = content.match(/\[내 결정\][\s\S]*?(?=\[전략 JSON\]|###|```)/i) ||
-                           content.match(/### 2\. \[내 결정\][\s\S]*?(?=### 3|```)/i);
-      if (decisionMatch) {
-        athenaDecision = decisionMatch[0].replace(/\[내 결정\]|### 2\. \[내 결정\]/gi, '').trim();
-      }
-
-      // JSON 추출 시도
-      const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const jsonStr = jsonMatch[1] || jsonMatch[0];
-        const parsed = JSON.parse(jsonStr);
-
-        // Athena의 사고 과정 추가 (JSON에 없으면 추출한 것 사용)
-        if (!parsed.athenaThought && athenaThought) {
-          parsed.athenaThought = athenaThought;
-        }
-        if (!parsed.athenaDecision && athenaDecision) {
-          parsed.athenaDecision = athenaDecision;
-        }
-
-        console.log('📊 파싱된 전략:', {
-          ...parsed,
-          athenaThought: parsed.athenaThought ? parsed.athenaThought.substring(0, 100) + '...' : 'N/A'
-        });
-        return parsed;
-      }
-    } catch (error) {
-      console.error('❌ Strategy parsing error:', error);
-      console.error('원본 응답:', content.substring(0, 500));
-    }
-
-    // 기본 전략 반환
-    console.log('⚠️ 기본 전략 사용 (파싱 실패)');
-    return {
-      complexity: 'moderate',
-      category: 'conversation',
-      needsWebSearch: false,
-      collaborationMode: 'single',
-      recommendedAgents: ['ChatGPT'],
-      reasoning: 'Default strategy due to parsing error',
-      athenaThought: '',
-      agentInstructions: ''
-    };
-  }
+  // ─── Core methods (kept in orchestrator) ───────────────────────────
 
   /**
    * 스트리밍 처리 함수 (모든 협업 모드 지원, 이미지 데이터 포함)
@@ -470,7 +154,7 @@ ${learningContext}
 
       // 2. 전략 분석
       const strategy = await this.analyzeQuery(userId, sessionId, userMessage);
-      
+
       console.log('🎬 스트리밍 모드:', strategy.collaborationMode);
       if (projectId) {
         console.log('📁 프로젝트 컨텍스트 사용:', projectId);
@@ -509,22 +193,22 @@ ${learningContext}
    */
   getProjectContext(projectId, query = '') {
     if (!projectId) return '';
-    
+
     try {
       // 프로젝트 컨텍스트 가져오기
       let contexts;
       if (query) {
         contexts = this.memory.db.prepare(`
-          SELECT * FROM project_context 
-          WHERE project_id = ? 
+          SELECT * FROM project_context
+          WHERE project_id = ?
           AND (title LIKE ? OR content LIKE ?)
           ORDER BY importance DESC, updated_at DESC
           LIMIT 50
         `).all(projectId, `%${query}%`, `%${query}%`);
       } else {
         contexts = this.memory.db.prepare(`
-          SELECT * FROM project_context 
-          WHERE project_id = ? 
+          SELECT * FROM project_context
+          WHERE project_id = ?
           ORDER BY importance DESC, updated_at DESC
           LIMIT 100
         `).all(projectId);
@@ -534,16 +218,16 @@ ${learningContext}
       let resources;
       if (query) {
         resources = this.memory.db.prepare(`
-          SELECT * FROM project_resources 
-          WHERE project_id = ? 
+          SELECT * FROM project_resources
+          WHERE project_id = ?
           AND (title LIKE ? OR content LIKE ?)
           ORDER BY created_at DESC
           LIMIT 50
         `).all(projectId, `%${query}%`, `%${query}%`);
       } else {
         resources = this.memory.db.prepare(`
-          SELECT * FROM project_resources 
-          WHERE project_id = ? 
+          SELECT * FROM project_resources
+          WHERE project_id = ?
           ORDER BY created_at DESC
           LIMIT 100
         `).all(projectId);
@@ -553,7 +237,7 @@ ${learningContext}
       const resourceContexts = resources.map((resource) => {
         const metadata = resource.metadata ? JSON.parse(resource.metadata) : {};
         let content = resource.content || '';
-        
+
         // 메타데이터 정보 추가
         if (metadata.fileSize) {
           content = `파일 크기: ${(metadata.fileSize / 1024).toFixed(1)} KB\n${content}`;
@@ -561,7 +245,7 @@ ${learningContext}
         if (metadata.fileType) {
           content = `파일 타입: ${metadata.fileType}\n${content}`;
         }
-        
+
         return {
           context_type: resource.resource_type,
           title: resource.title,
@@ -588,8 +272,8 @@ ${learningContext}
 
       const contextText = uniqueContexts.map((ctx, idx) => {
         const tags = ctx.tags ? (typeof ctx.tags === 'string' ? JSON.parse(ctx.tags) : ctx.tags) : [];
-        const contentPreview = ctx.content && ctx.content.length > 2000 
-          ? ctx.content.substring(0, 2000) + '...' 
+        const contentPreview = ctx.content && ctx.content.length > 2000
+          ? ctx.content.substring(0, 2000) + '...'
           : ctx.content;
         return `[${idx + 1}] [${ctx.context_type}] ${ctx.title}\n${contentPreview}${tags.length > 0 ? `\n태그: ${tags.join(', ')}` : ''}`;
       }).join('\n\n');
@@ -599,6 +283,21 @@ ${learningContext}
       console.error('Failed to get project context:', error);
       return '';
     }
+  }
+
+  /**
+   * 웹 검색 결과를 시스템 프롬프트용 문자열로 포맷
+   */
+  _buildSearchContext(searchResults) {
+    if (!searchResults || searchResults.length === 0 || !this.webSearchService) {
+      return '';
+    }
+    const searchContextWithNumbers = searchResults.map((result, index) => {
+      const reliability = this.webSearchService.getSourceReliability(result.link);
+      return `[출처 ${index + 1}]\n제목: ${result.title || '제목 없음'}\nURL: ${result.link}\n내용: ${result.snippet || ''}\n신뢰도: ${reliability}`;
+    }).join('\n\n');
+
+    return `\n\n## 최신 웹 검색 정보\n아래 검색 결과를 참고하되, 신뢰도 등급(HIGH/MEDIUM/LOW)을 고려하세요.\n\n${searchContextWithNumbers}\n\n### 답변 규칙\n- 검색 결과를 인용할 때 [출처 번호] 형식으로 표기\n- HIGH 신뢰도 출처를 우선적으로 참고\n- 검색 결과와 기존 지식이 충돌하면, 날짜가 더 최근인 정보를 우선\n- 확실하지 않은 정보는 "검색 결과에 따르면..." 으로 표현`;
   }
 
   /**
@@ -614,9 +313,9 @@ ${learningContext}
 
     const context = this.memory.getContextWindow(sessionId, 10);
     const identity = this.memory.getAllIdentity('core');
-    
+
     let systemPrompt = this.buildAthenaSystemPrompt(identity, projectId);
-    
+
     // 프로젝트 컨텍스트 추가 (프로젝트가 선택된 경우 최우선 참고)
     if (projectId) {
       const projectContext = this.getProjectContext(projectId, userMessage.substring(0, 100));
@@ -625,43 +324,30 @@ ${learningContext}
         systemPrompt = projectContext + '\n\n' + systemPrompt;
       }
     }
-    
+
     // 웹 검색 결과가 있으면 시스템 프롬프트에 추가
     if (searchResults && searchResults.length > 0 && this.webSearchService) {
       console.log('✅ 웹 검색 결과를 프롬프트에 추가:', searchResults.length, '개');
-      const searchContext = this.webSearchService.formatResultsForAI(searchResults);
-      
+
       const isYouTubeVideo = searchResults[0]?.source === 'YouTube' && searchResults[0]?.videoId;
-      let promptAddition = '';
-      
+
       if (isYouTubeVideo) {
-        promptAddition = `\n\n## 유튜브 동영상 정보\n다음은 사용자가 요청한 유튜브 동영상의 정보입니다. 이 동영상의 제목, 설명, 채널 정보를 바탕으로 동영상의 내용을 요약하고 분석하세요:\n\n${searchContext}\n\n중요: 동영상의 제목과 설명을 바탕으로 동영상의 주요 내용을 요약하고, 사용자가 요청한 내용(예: 요약, 분석 등)에 맞게 답변하세요. 동영상의 링크도 함께 제공하세요.`;
+        const searchContext = this.webSearchService.formatResultsForAI(searchResults);
+        systemPrompt += `\n\n## 유튜브 동영상 정보\n다음은 사용자가 요청한 유튜브 동영상의 정보입니다. 이 동영상의 제목, 설명, 채널 정보를 바탕으로 동영상의 내용을 요약하고 분석하세요:\n\n${searchContext}\n\n중요: 동영상의 제목과 설명을 바탕으로 동영상의 주요 내용을 요약하고, 사용자가 요청한 내용(예: 요약, 분석 등)에 맞게 답변하세요. 동영상의 링크도 함께 제공하세요.`;
       } else {
-        const searchContextWithNumbers = searchResults.map((result, index) => {
-          const reliability = this.webSearchService.getSourceReliability(result.link);
-          return `[출처 ${index + 1}]
-제목: ${result.title || '제목 없음'}
-URL: ${result.link}
-내용: ${result.snippet || ''}
-신뢰도: ${reliability}`;
-        }).join('\n\n');
-        
-        promptAddition = `\n\n## 최신 웹 검색 정보\n다음은 최신 정보를 위해 웹에서 검색한 결과입니다. 이 정보를 참고하여 정확하고 최신의 답변을 제공하세요:\n\n${searchContextWithNumbers}\n\n### 출처 표시 규칙:\n1. 검색 결과의 정보를 사용할 때는 반드시 [출처 N] 형식으로 출처를 명시하세요 (N은 위의 번호).
-2. 예시: "서울의 내일 날씨는 맑고 기온은 15도입니다 [출처 1]."
-3. 여러 출처의 정보를 종합할 때는 [출처 1, 출처 2] 형식으로 표시하세요.
-4. 검색 결과에 포함된 실제 정보를 사용하여 답변하세요. 검색 결과에 날씨 정보가 포함되어 있다면 그 정보를 직접 인용하고 설명하세요.
-5. 각 정보의 출처를 명시하세요. 검색 결과를 단순히 링크만 제공하는 것이 아니라, 검색 결과의 내용을 바탕으로 구체적인 답변을 제공하세요.`;
+        const searchContextBlock = this._buildSearchContext(searchResults);
+        if (searchContextBlock) {
+          systemPrompt += searchContextBlock;
+        }
       }
-      
-      systemPrompt += promptAddition;
     }
-    
+
     // 메시지 구성 (이미지 데이터 포함)
     const messages = [
       { role: 'system', content: systemPrompt },
       ...context
     ];
-    
+
     // 사용자 메시지에 이미지가 있으면 Vision API 형식으로 추가
     if (imageData.length > 0 && (agentName === 'ChatGPT' || agentName === 'Gemini')) {
       // OpenAI Vision API 형식
@@ -688,28 +374,9 @@ URL: ${result.link}
     yield metadataJson + '\n';
 
     for await (const chunk of stream) {
-      let content = '';
-      
-      if (agentName === 'ChatGPT' || agentName === 'Grok') {
-        const delta = chunk.choices?.[0]?.delta?.content;
-        if (delta) {
-          content = delta;
-          fullContent += delta;
-        }
-      } else if (agentName === 'Claude') {
-        if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
-          content = chunk.delta.text;
-          fullContent += chunk.delta.text;
-        }
-      } else if (agentName === 'Gemini') {
-        const text = chunk.text();
-        if (text) {
-          content = text;
-          fullContent += text;
-        }
-      }
-
+      const content = this._extractChunkContent(agentName, chunk);
       if (content) {
+        fullContent += content;
         const chunkJson = JSON.stringify({ type: 'chunk', content }, null, 0);
         yield chunkJson + '\n';
       }
@@ -808,9 +475,17 @@ URL: ${result.link}
     const agent = this.providers[agentName];
 
     if (!agent || !agent.isAvailable) {
+      // Find an available fallback agent (iterative, no recursion)
+      const fallback = this.fallbackOrder.find(name => {
+        const p = this.providers[name];
+        return p && p.isAvailable;
+      });
+      if (!fallback) {
+        return { response: '모든 AI 제공자가 현재 사용 불가능합니다. 잠시 후 다시 시도해주세요.', agent: 'system' };
+      }
       return await this.executeSingle(userId, sessionId, userMessage, {
         ...strategy,
-        recommendedAgents: this.fallbackOrder
+        recommendedAgents: [fallback]
       }, searchResults);
     }
 
@@ -818,22 +493,11 @@ URL: ${result.link}
     const identity = this.memory.getAllIdentity('core');
 
     let systemPrompt = this.buildAthenaSystemPrompt(identity);
-    
+
     // 웹 검색 결과가 있으면 시스템 프롬프트에 추가
-    if (searchResults && searchResults.length > 0 && this.webSearchService) {
-      const searchContextWithNumbers = searchResults.map((result, index) => {
-        const reliability = this.webSearchService.getSourceReliability(result.link);
-        return `[출처 ${index + 1}]
-제목: ${result.title || '제목 없음'}
-URL: ${result.link}
-내용: ${result.snippet || ''}
-신뢰도: ${reliability}`;
-      }).join('\n\n');
-      
-      systemPrompt += `\n\n## 최신 웹 검색 정보\n다음은 최신 정보를 위해 웹에서 검색한 결과입니다. 이 정보를 참고하여 정확하고 최신의 답변을 제공하세요:\n\n${searchContextWithNumbers}\n\n### 출처 표시 규칙:\n1. 검색 결과의 정보를 사용할 때는 반드시 [출처 N] 형식으로 출처를 명시하세요 (N은 위의 번호).
-2. 예시: "서울의 내일 날씨는 맑고 기온은 15도입니다 [출처 1]."
-3. 여러 출처의 정보를 종합할 때는 [출처 1, 출처 2] 형식으로 표시하세요.
-4. 모든 정보는 위의 검색 결과를 기반으로 답변하고, 각 정보의 출처를 명시하세요.`;
+    const searchContext = this._buildSearchContext(searchResults);
+    if (searchContext) {
+      systemPrompt += searchContext;
     }
 
     const messages = [
@@ -844,25 +508,25 @@ URL: ${result.link}
 
     // 성능 추적 시작
     const tracking = this.performanceMonitor.startTracking(agentName, strategy.collaborationMode || 'single');
-    
+
     try {
       const startTime = Date.now();
       let response = await agent.chat(messages);
       const responseTime = Date.now() - startTime;
-      
+
       // MCP 도구 호출 처리
       if (this.mcpManager && this.mcpManager.enabled) {
         const toolResult = await this.mcpManager.processToolCalls(response.content);
         if (toolResult.hasToolCalls) {
           // 도구 실행 결과를 포함한 업데이트된 응답
           response.content = toolResult.updatedResponse;
-          logger.info('MCP tools executed', { 
+          logger.info('MCP tools executed', {
             toolCount: toolResult.results.length,
             tools: toolResult.results.map(r => r.tool)
           });
         }
       }
-      
+
       // 성공 기록
       this.performanceMonitor.recordSuccess(tracking, responseTime, response.usage, response.model);
 
@@ -964,10 +628,10 @@ ${athenaInstructions || '당신의 전문성을 살려 최선의 답변을 제�
       try {
         const response = await agent.chat(messages);
         const responseTime = Date.now() - startTime;
-        
+
         // 성공 기록
         this.performanceMonitor.recordSuccess(tracking, responseTime, response.usage, response.model);
-        
+
         return {
           agent: agentName,
           content: response.content,
@@ -1307,9 +971,9 @@ ${votes.map(v => `### ${v.agent}의 의견과 선택\n${v.response}`).join('\n\n
     const agents = strategy.recommendedAgents;
     const context = this.memory.getContextWindow(sessionId, 10);
     const identity = this.memory.getAllIdentity('core');
-    
+
     let systemPrompt = this.buildAthenaSystemPrompt(identity, projectId);
-    
+
     // 프로젝트 컨텍스트 추가 (프로젝트가 선택된 경우 최우선 참고)
     if (projectId) {
       const projectContext = this.getProjectContext(projectId, userMessage.substring(0, 100));
@@ -1318,7 +982,7 @@ ${votes.map(v => `### ${v.agent}의 의견과 선택\n${v.response}`).join('\n\n
         systemPrompt = projectContext + '\n\n' + systemPrompt;
       }
     }
-    
+
     if (searchResults && searchResults.length > 0 && this.webSearchService) {
       const searchContextWithNumbers = searchResults.map((result, index) => {
         const reliability = this.webSearchService.getSourceReliability(result.link);
@@ -1328,7 +992,7 @@ URL: ${result.link}
 내용: ${result.snippet || ''}
 신뢰도: ${reliability}`;
       }).join('\n\n');
-      
+
       systemPrompt += `\n\n## 최신 웹 검색 정보\n다음은 최신 정보를 위해 웹에서 검색한 결과입니다. 이 정보를 참고하여 정확하고 최신의 답변을 제공하세요:\n\n${searchContextWithNumbers}\n\n### 출처 표시 규칙:\n1. 검색 결과의 정보를 사용할 때는 반드시 [출처 N] 형식으로 출처를 명시하세요 (N은 위의 번호).
 2. 예시: "서울의 내일 날씨는 맑고 기온은 15도입니다 [출처 1]."
 3. 여러 출처의 정보를 종합할 때는 [출처 1, 출처 2] 형식으로 표시하세요.
@@ -1364,13 +1028,13 @@ URL: ${result.link}
     });
 
     const results = (await Promise.all(promises)).filter(r => r !== null);
-    
+
     // 각 AI의 응답을 스트리밍으로 전송
     for (const result of results) {
-      yield JSON.stringify({ 
-        type: 'agent_response', 
-        agent: result.agent, 
-        content: result.content 
+      yield JSON.stringify({
+        type: 'agent_response',
+        agent: result.agent,
+        content: result.content
       }, null, 0) + '\n';
     }
 
@@ -1385,34 +1049,16 @@ ${results.map((r, i) => `[${r.agent}의 답변]\n${r.content}\n`).join('\n')}
 종합된 답변을 작성하고, 각 AI의 의견이 다른 부분이 있다면 그것도 언급하세요.`;
 
     yield JSON.stringify({ type: 'synthesis_start' }, null, 0) + '\n';
-    
+
     const synthesisStream = await brain.streamChat([
       { role: 'user', content: synthesisPrompt }
     ]);
 
     let fullContent = '';
     for await (const chunk of synthesisStream) {
-      let content = '';
-      if (brain.name === 'ChatGPT' || brain.name === 'Grok') {
-        const delta = chunk.choices?.[0]?.delta?.content;
-        if (delta) {
-          content = delta;
-          fullContent += delta;
-        }
-      } else if (brain.name === 'Claude') {
-        if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
-          content = chunk.delta.text;
-          fullContent += chunk.delta.text;
-        }
-      } else if (brain.name === 'Gemini') {
-        const text = chunk.text();
-        if (text) {
-          content = text;
-          fullContent += text;
-        }
-      }
-
+      const content = this._extractChunkContent(brain.name, chunk);
       if (content) {
+        fullContent += content;
         yield JSON.stringify({ type: 'chunk', content }, null, 0) + '\n';
       }
     }
@@ -1434,7 +1080,7 @@ ${results.map((r, i) => `[${r.agent}의 답변]\n${r.content}\n`).join('\n')}
     const context = this.memory.getContextWindow(sessionId, 10);
     const identity = this.memory.getAllIdentity('core');
     let baseSystemPrompt = this.buildAthenaSystemPrompt(identity, projectId);
-    
+
     // 프로젝트 컨텍스트 추가 (프로젝트가 선택된 경우 최우선 참고)
     if (projectId) {
       const projectContext = this.getProjectContext(projectId, userMessage.substring(0, 100));
@@ -1443,7 +1089,7 @@ ${results.map((r, i) => `[${r.agent}의 답변]\n${r.content}\n`).join('\n')}
         baseSystemPrompt = projectContext + '\n\n' + baseSystemPrompt;
       }
     }
-    
+
     let currentResult = userMessage;
     const steps = [];
 
@@ -1475,27 +1121,9 @@ ${results.map((r, i) => `[${r.agent}의 답변]\n${r.content}\n`).join('\n')}
 
       let stepContent = '';
       for await (const chunk of stream) {
-        let content = '';
-        if (agentName === 'ChatGPT' || agentName === 'Grok') {
-          const delta = chunk.choices?.[0]?.delta?.content;
-          if (delta) {
-            content = delta;
-            stepContent += delta;
-          }
-        } else if (agentName === 'Claude') {
-          if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
-            content = chunk.delta.text;
-            stepContent += chunk.delta.text;
-          }
-        } else if (agentName === 'Gemini') {
-          const text = chunk.text();
-          if (text) {
-            content = text;
-            stepContent += text;
-          }
-        }
-
+        const content = this._extractChunkContent(agentName, chunk);
         if (content) {
+          stepContent += content;
           yield JSON.stringify({ type: 'chunk', content }, null, 0) + '\n';
         }
       }
@@ -1521,9 +1149,9 @@ ${results.map((r, i) => `[${r.agent}의 답변]\n${r.content}\n`).join('\n')}
     const rounds = 2;
     const debates = [];
     const identity = this.memory.getAllIdentity('core');
-    
+
     let baseSystemPrompt = this.buildAthenaSystemPrompt(identity, projectId);
-    
+
     // 프로젝트 컨텍스트 추가 (프로젝트가 선택된 경우 최우선 참고)
     if (projectId) {
       const projectContext = this.getProjectContext(projectId, userMessage.substring(0, 100));
@@ -1532,7 +1160,7 @@ ${results.map((r, i) => `[${r.agent}의 답변]\n${r.content}\n`).join('\n')}
         baseSystemPrompt = projectContext + '\n\n' + baseSystemPrompt;
       }
     }
-    
+
     if (searchResults && searchResults.length > 0 && this.webSearchService) {
       const searchContext = this.webSearchService.formatResultsForAI(searchResults);
       baseSystemPrompt += `\n\n## 최신 웹 검색 정보\n다음은 최신 정보를 위해 웹에서 검색한 결과입니다. 이 정보를 참고하여 정확하고 최신의 답변을 제공하세요:\n\n${searchContext}\n\n중요: 모든 정보는 위의 검색 결과를 기반으로 답변하고, 각 정보의 출처를 명시하세요.`;
@@ -1568,27 +1196,9 @@ ${results.map((r, i) => `[${r.agent}의 답변]\n${r.content}\n`).join('\n')}
 
         let opinionContent = '';
         for await (const chunk of stream) {
-          let content = '';
-          if (agentName === 'ChatGPT' || agentName === 'Grok') {
-            const delta = chunk.choices?.[0]?.delta?.content;
-            if (delta) {
-              content = delta;
-              opinionContent += delta;
-            }
-          } else if (agentName === 'Claude') {
-            if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
-              content = chunk.delta.text;
-              opinionContent += chunk.delta.text;
-            }
-          } else if (agentName === 'Gemini') {
-            const text = chunk.text();
-            if (text) {
-              content = text;
-              opinionContent += text;
-            }
-          }
-
+          const content = this._extractChunkContent(agentName, chunk);
           if (content) {
+            opinionContent += content;
             yield JSON.stringify({ type: 'chunk', content }, null, 0) + '\n';
           }
         }
@@ -1617,27 +1227,9 @@ ${debates.map((round, i) =>
 
     let fullContent = '';
     for await (const chunk of conclusionStream) {
-      let content = '';
-      if (brain.name === 'ChatGPT' || brain.name === 'Grok') {
-        const delta = chunk.choices?.[0]?.delta?.content;
-        if (delta) {
-          content = delta;
-          fullContent += delta;
-        }
-      } else if (brain.name === 'Claude') {
-        if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
-          content = chunk.delta.text;
-          fullContent += chunk.delta.text;
-        }
-      } else if (brain.name === 'Gemini') {
-        const text = chunk.text();
-        if (text) {
-          content = text;
-          fullContent += text;
-        }
-      }
-
+      const content = this._extractChunkContent(brain.name, chunk);
       if (content) {
+        fullContent += content;
         yield JSON.stringify({ type: 'chunk', content }, null, 0) + '\n';
       }
     }
@@ -1658,9 +1250,9 @@ ${debates.map((round, i) =>
     const agents = strategy.recommendedAgents;
     const votes = [];
     const identity = this.memory.getAllIdentity('core');
-    
+
     let baseSystemPrompt = this.buildAthenaSystemPrompt(identity, projectId);
-    
+
     // 프로젝트 컨텍스트 추가 (프로젝트가 선택된 경우 최우선 참고)
     if (projectId) {
       const projectContext = this.getProjectContext(projectId, userMessage.substring(0, 100));
@@ -1669,7 +1261,7 @@ ${debates.map((round, i) =>
         baseSystemPrompt = projectContext + '\n\n' + baseSystemPrompt;
       }
     }
-    
+
     if (searchResults && searchResults.length > 0 && this.webSearchService) {
       const searchContext = this.webSearchService.formatResultsForAI(searchResults);
       baseSystemPrompt += `\n\n## 최신 웹 검색 정보\n다음은 최신 정보를 위해 웹에서 검색한 결과입니다. 이 정보를 참고하여 정확하고 최신의 답변을 제공하세요:\n\n${searchContext}\n\n중요: 모든 정보는 위의 검색 결과를 기반으로 답변하고, 각 정보의 출처를 명시하세요.`;
@@ -1707,27 +1299,9 @@ ${debates.map((round, i) =>
 
       let voteContent = '';
       for await (const chunk of stream) {
-        let content = '';
-        if (agentName === 'ChatGPT' || agentName === 'Grok') {
-          const delta = chunk.choices?.[0]?.delta?.content;
-          if (delta) {
-            content = delta;
-            voteContent += delta;
-          }
-        } else if (agentName === 'Claude') {
-          if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
-            content = chunk.delta.text;
-            voteContent += chunk.delta.text;
-          }
-        } else if (agentName === 'Gemini') {
-          const text = chunk.text();
-          if (text) {
-            content = text;
-            voteContent += text;
-          }
-        }
-
+        const content = this._extractChunkContent(agentName, chunk);
         if (content) {
+          voteContent += content;
           yield JSON.stringify({ type: 'chunk', content }, null, 0) + '\n';
         }
       }
@@ -1753,27 +1327,9 @@ ${votes.map(v => `[${v.agent}]\n${v.response}`).join('\n\n')}
 
     let fullContent = '';
     for await (const chunk of tallyStream) {
-      let content = '';
-      if (brain.name === 'ChatGPT' || brain.name === 'Grok') {
-        const delta = chunk.choices?.[0]?.delta?.content;
-        if (delta) {
-          content = delta;
-          fullContent += delta;
-        }
-      } else if (brain.name === 'Claude') {
-        if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
-          content = chunk.delta.text;
-          fullContent += chunk.delta.text;
-        }
-      } else if (brain.name === 'Gemini') {
-        const text = chunk.text();
-        if (text) {
-          content = text;
-          fullContent += text;
-        }
-      }
-
+      const content = this._extractChunkContent(brain.name, chunk);
       if (content) {
+        fullContent += content;
         yield JSON.stringify({ type: 'chunk', content }, null, 0) + '\n';
       }
     }
@@ -1788,307 +1344,20 @@ ${votes.map(v => `[${v.agent}]\n${v.response}`).join('\n\n')}
   }
 
   /**
-   * 사용자 메시지에서 기억할 정보를 추출하여 워크스페이스 메모리에 저장
+   * AI 스트림 청크에서 텍스트 추출 (provider-specific parsing)
    */
-  _extractMemoryFromMessage(userMessage) {
-    try {
-      if (!this.memoryExtractor.shouldRemember(userMessage)) return;
-
-      const extractions = this.memoryExtractor.extractFromConversation([
-        { role: 'user', content: userMessage }
-      ]);
-
-      if (extractions.length > 0) {
-        this.memoryExtractor.updateMemoryFromExtractions(extractions);
-        this.memoryExtractor.logDailySummary(
-          `메모리 추출: ${extractions.map(e => e.category).join(', ')}`
-        );
+  _extractChunkContent(agentName, chunk) {
+    if (agentName === 'ChatGPT' || agentName === 'Grok') {
+      return chunk.choices?.[0]?.delta?.content || '';
+    } else if (agentName === 'Claude') {
+      if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
+        return chunk.delta.text || '';
       }
-    } catch (error) {
-      logger.error('메모리 추출 실패', { error: error.message });
+      return '';
+    } else if (agentName === 'Gemini') {
+      try { return chunk.text() || ''; } catch { return ''; }
     }
-  }
-
-  /**
-   * 텔레그램 전용 빠른 스트리밍 - analyzeQuery() 생략, 단일 AI 직행
-   */
-  async *processTelegramStream(userId, sessionId, userMessage) {
-    try {
-      // 멀티 AI 모드 감지
-      const multiAIPatterns = /여러\s?AI|멀티\s?AI|다른\s?AI들?한테|토론|투표|비교해/i;
-      if (multiAIPatterns.test(userMessage)) {
-        yield* this._telegramMultiAI(userId, sessionId, userMessage);
-        return;
-      }
-
-      // 사용자 메시지 저장
-      this.memory.addShortTermMemory(userId, sessionId, 'user', userMessage);
-
-      // 텔레그램 전용 AI 우선순위: 속도 우선 (Gemini Flash → Grok Fast → ChatGPT → Claude)
-      const telegramOrder = ['Gemini', 'Grok', 'ChatGPT', 'Claude'];
-      let agent = null;
-      let agentName = '';
-      for (const name of telegramOrder) {
-        const provider = this.providers[name];
-        if (provider && provider.isAvailable) {
-          agent = provider;
-          agentName = name;
-          break;
-        }
-      }
-
-      if (!agent) {
-        throw new Error('사용 가능한 AI가 없습니다');
-      }
-
-      // 대화 컨텍스트 (최근 6개만 - 텔레그램은 가볍게)
-      const context = this.memory.getContextWindow(sessionId, 6);
-      const identity = this.memory.getAllIdentity('core');
-
-      // 텔레그램 전용 시스템 프롬프트
-      let systemPrompt = this.buildAthenaSystemPrompt(identity, null, { telegram: true });
-
-      // 텔레그램용 추가 지시
-      systemPrompt += `\n\n=== 텔레그램 응답 규칙 ===
-- 짧고 자연스럽게 답변 (200자 이내 권장, 필요시 더 길게)
-- 마크다운은 텔레그램 호환만 사용 (*굵게*, _기울임_)
-- 서버/시스템 관련 질문에는 아래 실시간 데이터를 활용해 자연스럽게 답변하세요
-- 도구 호출 문법(mcp_tool 등)은 사용하지 마세요. 아래 데이터로 직접 답변하세요
-- 검색 결과가 제공되면 해당 정보를 활용해 답변하고, 출처(URL)를 함께 알려주세요`;
-
-      // 웹/유튜브 검색 + 시스템 데이터를 병렬 수집
-      const searchPromise = this._telegramWebSearch(userMessage);
-      const sysDataPromise = this._getTelegramSystemContext();
-
-      const [searchResult, sysDataResult] = await Promise.allSettled([searchPromise, sysDataPromise]);
-
-      // 실시간 시스템 데이터 주입
-      const sysData = sysDataResult.status === 'fulfilled' ? sysDataResult.value : null;
-      if (sysData) {
-        systemPrompt += `\n\n=== 실시간 서버 데이터 ===\n${sysData}`;
-      }
-
-      // 검색 결과 주입
-      const searchData = searchResult.status === 'fulfilled' ? searchResult.value : null;
-      if (searchData) {
-        systemPrompt += searchData;
-      }
-
-      const messages = [
-        { role: 'system', content: systemPrompt },
-        ...context,
-        { role: 'user', content: userMessage }
-      ];
-
-      logger.info('Telegram stream: calling AI', { agent: agentName });
-      const stream = await agent.streamChat(messages);
-      let fullContent = '';
-
-      for await (const chunk of stream) {
-        let content = '';
-
-        if (agentName === 'ChatGPT' || agentName === 'Grok') {
-          const delta = chunk.choices?.[0]?.delta?.content;
-          if (delta) content = delta;
-        } else if (agentName === 'Claude') {
-          if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
-            content = chunk.delta.text;
-          }
-        } else if (agentName === 'Gemini') {
-          const text = chunk.text();
-          if (text) content = text;
-        }
-
-        if (content) {
-          fullContent += content;
-          yield content;
-        }
-      }
-
-      logger.info('Telegram stream: AI response complete', { length: fullContent.length, agent: agentName });
-
-      // 어시스턴트 응답 저장
-      if (fullContent) {
-        this.memory.addShortTermMemory(userId, sessionId, 'assistant', fullContent, {
-          strategy: 'telegram_direct',
-          agents_used: [agentName]
-        });
-      }
-
-      // 메모리 추출
-      this._extractMemoryFromMessage(userMessage);
-
-    } catch (error) {
-      console.error('Telegram stream error:', error);
-      yield `죄송해요, 처리 중 오류가 발생했어요: ${error.message}`;
-    }
-  }
-
-  /**
-   * 멀티 AI 모드: 여러 AI에게 동시에 질문하고 응답 비교
-   */
-  async *_telegramMultiAI(userId, sessionId, userMessage) {
-    this.memory.addShortTermMemory(userId, sessionId, 'user', userMessage);
-
-    // 사용 가능한 AI 최대 3개 선택
-    const available = [];
-    for (const name of ['ChatGPT', 'Gemini', 'Claude', 'Grok']) {
-      const provider = this.providers[name];
-      if (provider && provider.isAvailable) {
-        available.push({ name, provider });
-      }
-      if (available.length >= 3) break;
-    }
-
-    if (available.length === 0) {
-      yield '사용 가능한 AI가 없습니다.';
-      return;
-    }
-
-    yield `*멀티 AI 모드* (${available.map(a => a.name).join(', ')})\n\n`;
-
-    const identity = this.memory.getAllIdentity('core');
-    const systemPrompt = this.buildAthenaSystemPrompt(identity, null, { telegram: true })
-      + '\n\n짧고 핵심적으로 답변하세요 (300자 이내).';
-
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userMessage }
-    ];
-
-    // 병렬 호출
-    const results = await Promise.allSettled(
-      available.map(({ name, provider }) =>
-        provider.chat(messages, { maxTokens: 500 })
-          .then(r => ({ name, content: r.content }))
-      )
-    );
-
-    const responses = [];
-    for (const result of results) {
-      if (result.status === 'fulfilled') {
-        const { name, content } = result.value;
-        responses.push(`*[${name}]*\n${content}`);
-        yield `*[${name}]*\n${content}\n\n`;
-      } else {
-        const name = available[results.indexOf(result)]?.name || '?';
-        yield `*[${name}]* 응답 실패: ${result.reason?.message || '알 수 없는 오류'}\n\n`;
-      }
-    }
-
-    // 메모리에 combined 저장
-    if (responses.length > 0) {
-      this.memory.addShortTermMemory(userId, sessionId, 'assistant', responses.join('\n\n'), {
-        strategy: 'multi_ai',
-        agents_used: available.map(a => a.name)
-      });
-    }
-  }
-
-  /**
-   * 텔레그램 대화용 실시간 시스템 데이터 수집
-   * 30초 캐시 + 병렬 수집으로 최적화
-   */
-  async _getTelegramSystemContext() {
-    // 30초 캐시
-    const now = Date.now();
-    if (this._sysContextCache && (now - this._sysContextCacheTime) < 30000) {
-      return this._sysContextCache;
-    }
-
-    try {
-      const parts = [];
-      const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms));
-
-      // system_monitor + PM2 병렬 실행 (각 3초 타임아웃)
-      const [sysResult, pm2Result] = await Promise.allSettled([
-        Promise.race([this.mcpManager.executeTool('system_monitor', { action: 'overview' }), timeout(3000)]),
-        Promise.race([this.mcpManager.executeTool('process_manager', { action: 'list' }), timeout(3000)])
-      ]);
-
-      // 시스템 모니터 결과
-      if (sysResult.status === 'fulfilled' && sysResult.value?.success) {
-        const d = sysResult.value.result || sysResult.value;
-        const cpu = d.cpu || {};
-        const mem = d.memory || {};
-        const disks = Array.isArray(d.disk) ? d.disk : [];
-        const rootDisk = disks.find(dk => dk.mountpoint === '/');
-
-        parts.push(`[서버] ${d.hostname || 'unknown'}, uptime: ${d.uptime || '?'}`);
-        parts.push(`[CPU] ${cpu.cores || '?'}코어, 사용률: ${cpu.usagePercent || '?'}, Load: ${Array.isArray(cpu.loadAvg) ? cpu.loadAvg.join(', ') : '?'}`);
-        parts.push(`[메모리] 전체: ${mem.total || '?'}, 사용: ${mem.used || '?'}, 여유: ${mem.free || '?'}`);
-        if (rootDisk) parts.push(`[디스크 /] ${rootDisk.used}/${rootDisk.size} (${rootDisk.usagePercent})`);
-      }
-
-      // PM2 결과
-      if (pm2Result.status === 'fulfilled' && pm2Result.value?.success) {
-        const procs = pm2Result.value.result?.processes || pm2Result.value.result || [];
-        if (Array.isArray(procs) && procs.length > 0) {
-          const summary = procs.map(p => {
-            const name = p.name || p.pm2_env?.name || '?';
-            const status = p.pm2_env?.status || p.status || '?';
-            const mem = p.monit?.memory ? `${(p.monit.memory / 1024 / 1024).toFixed(0)}MB` : '-';
-            return `${name}(${status}, ${mem})`;
-          }).join(', ');
-          parts.push(`[PM2] ${procs.length}개 프로세스: ${summary}`);
-        }
-      }
-
-      const result = parts.length > 0 ? parts.join('\n') : null;
-      this._sysContextCache = result;
-      this._sysContextCacheTime = now;
-      return result;
-    } catch (e) {
-      logger.warn('Telegram system context failed', e);
-      return this._sysContextCache || null;
-    }
-  }
-
-  /**
-   * 텔레그램 메시지에 대한 웹/유튜브 검색 수행
-   * @returns {string|null} 시스템 프롬프트에 추가할 검색 결과 문자열
-   */
-  async _telegramWebSearch(userMessage) {
-    if (!this.webSearchService) return null;
-
-    try {
-      const queryLower = userMessage.toLowerCase();
-      const needsWeb = this.webSearchService.needsWebSearch(userMessage) ||
-        /검색해\s?줘|검색해\s?봐|찾아\s?줘|찾아\s?봐|알려\s?줘.*최신|search\s+for/i.test(userMessage);
-      const needsYouTube = this.webSearchService.needsYouTubeSearch(userMessage);
-
-      if (!needsWeb && !needsYouTube) return null;
-
-      const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms));
-      const searchType = needsYouTube ? 'youtube' : 'web';
-
-      logger.info('Telegram search triggered', { type: searchType, query: userMessage.substring(0, 50) });
-
-      const searchResponse = await Promise.race([
-        this.webSearchService.search(userMessage, { type: searchType, numResults: 3 }),
-        timeout(3000)
-      ]);
-
-      const results = searchResponse?.results;
-      if (!results || results.length === 0) return null;
-
-      if (needsYouTube) {
-        const items = results.map((r, i) =>
-          `${i + 1}. ${r.title || '제목 없음'}\n   채널: ${r.channelTitle || r.channel || '-'}\n   URL: ${r.link}`
-        ).join('\n');
-        return `\n\n=== 유튜브 검색 결과 ===\n${items}\n\n위 영상 정보를 바탕으로 답변하고 URL을 함께 알려주세요.`;
-      }
-
-      const items = results.map((r, i) => {
-        const reliability = this.webSearchService.getSourceReliability(r.link);
-        return `[출처 ${i + 1}] ${r.title || '제목 없음'}\nURL: ${r.link}\n내용: ${r.snippet || ''}\n신뢰도: ${reliability}`;
-      }).join('\n\n');
-      return `\n\n=== 웹 검색 결과 ===\n${items}\n\n위 검색 결과를 참고하여 답변하고, 정보를 인용할 때 출처 URL을 함께 알려주세요.`;
-
-    } catch (e) {
-      logger.warn('Telegram web search failed', e.message);
-      return null;
-    }
+    return '';
   }
 
   buildAthenaSystemPrompt(identity, projectId = null, options = {}) {
@@ -2153,6 +1422,23 @@ ${identity.map(i => `- ${i.key}: ${JSON.stringify(i.value)}`).join('\n')}`;
     if (!projectId) {
       prompt += `\n\n=== 현재 모드: 일반 AI 답변 모드 ===\n현재 특정 프로젝트가 선택되지 않았으므로, 일반적인 AI 지식과 정보를 바탕으로 답변하세요.`;
     }
+
+    // Oracle DB 접근 안내 (금융 질문 대응)
+    prompt += `\n\n=== Oracle 금융 데이터 접근 ===
+금융/투자/시장 관련 질문에는 Oracle 2.0 DB에서 실시간 데이터를 조회할 수 있습니다.
+query_database 도구로 DB경로 "/home/ubuntu/oracle/data/oracle.db"를 지정하여 SELECT 쿼리를 실행하세요.
+주요 테이블:
+- regimes: 시장 레짐 (regime, confidence, timestamp)
+- market_data: 자산 가격 (symbol, price, change_1d, category)
+- technical_analysis: 기술적 분석 (symbol, signal, confidence, rsi, macd_signal, trend, support_1, resistance_1, indicators_json, collected_at)
+- guru_holdings: 전설적 투자자 포트폴리오 (investor, ticker, shares, value_usd, change_type)
+- company_fundamentals: 기업 펀더멘털 (symbol, sector, pe_ratio, pb_ratio, roe, revenue_growth)
+- sentiment: 시장 심리 (indicator, value, label)
+- crypto_flow: 암호화폐 흐름 (name, value, change_1d)
+- money_flow: 자금 흐름 (asset, price, change_1d, regime)
+- news_sentiment: 뉴스 감성 (headline, compound_score, label)
+- analyses: AI 분석 결과 (type, summary, outlook, consensus)`;
+
 
     // MCP 도구 정보 추가
     if (this.mcpManager && this.mcpManager.enabled) {
