@@ -54,10 +54,15 @@ export class OracleClient {
       const resp = await this._fetch(`/market-data?${params}`);
       return resp?.data || [];
     }
+    const safeLimit = Math.max(1, Math.min(200, parseInt(limit, 10) || 15));
+    if (category && !/^[a-zA-Z0-9_\- ]+$/.test(category)) {
+      logger.warn('OracleClient: invalid category rejected:', category);
+      return [];
+    }
     let query = `SELECT symbol, price, change_1d, category FROM market_data
                  WHERE timestamp = (SELECT MAX(timestamp) FROM market_data)`;
-    if (category) query += ` AND category = '${category.replace(/'/g, "''")}'`;
-    query += ` ORDER BY ABS(change_1d) DESC LIMIT ${Number(limit)}`;
+    if (category) query += ` AND category = '${category}'`;
+    query += ` ORDER BY ABS(change_1d) DESC LIMIT ${safeLimit}`;
     return this._dbQuery(query);
   }
 
@@ -81,9 +86,13 @@ export class OracleClient {
       }
     }
     const s = normalizedSymbol || symbol?.toUpperCase();
+    if (s && !/^[A-Z0-9.\-]+$/.test(s)) {
+      logger.warn('OracleClient: invalid symbol rejected:', s);
+      return [];
+    }
     let query = `SELECT symbol, signal, confidence, rsi, trend FROM technical_analysis
                  WHERE collected_at = (SELECT MAX(collected_at) FROM technical_analysis)`;
-    if (s) query = `SELECT * FROM technical_analysis WHERE UPPER(symbol) = '${s.replace(/'/g, "''")}' LIMIT 1`;
+    if (s) query = `SELECT * FROM technical_analysis WHERE UPPER(symbol) = '${s}' LIMIT 1`;
     else query += ' ORDER BY confidence DESC';
     return this._dbQuery(query);
   }
@@ -109,8 +118,13 @@ export class OracleClient {
       return resp?.data || [];
     }
     if (investor) {
+      const safeInvestor = investor.replace(/[^a-zA-Z0-9\s.\-]/g, '').toLowerCase();
+      if (!safeInvestor) {
+        logger.warn('OracleClient: invalid investor name rejected:', investor);
+        return [];
+      }
       return this._dbQuery(
-        `SELECT symbol, shares, value, change_pct FROM guru_holdings WHERE LOWER(investor) LIKE '%${investor.toLowerCase().replace(/'/g, "''")}%' ORDER BY value DESC LIMIT 20`
+        `SELECT symbol, shares, value, change_pct FROM guru_holdings WHERE LOWER(investor) LIKE '%${safeInvestor}%' ORDER BY value DESC LIMIT 20`
       );
     }
     return this._dbQuery(
